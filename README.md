@@ -1,4 +1,4 @@
-# 📉∿ ModuTEC: Real-Time Modulation & Demodulation Monitor ∿📈
+# 📉∿ ModuTEC - Real-Time Modulation & Demodulation Monitor ∿📈
 
 **ModuTEC** is a real-time monitoring and simulation tool that implements both **analog** (AM, FM) and **digital** (ASK, FSK) modulation and demodulation techniques.  
 The system is developed in **Python** and provides interactive visualization of audio signals in  **time** domain.
