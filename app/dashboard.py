@@ -1,4 +1,5 @@
 import os
+import queue
 import numpy as np
 from PIL import Image
 from utils.styles import *
@@ -8,6 +9,7 @@ from tkinter import filedialog
 import matplotlib.pyplot as plt
 from utils import windowCenter as wc
 from core.audio.AudioController import AudioController
+from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
 from app.ui.SamplingStream import SamplingStream
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -33,6 +35,11 @@ class Dashboard(ctk.CTk):
         self.navbar_panel()
         self.display_signals()
         self.left_sidebar_panel()
+        
+        self._ui_timer_running = False
+        self.statusData.paused = True  # asegurar estado consistente al iniciar
+        self.statusData.is_running = False
+
 
 
     # Configures the main application window.
@@ -171,10 +178,26 @@ class Dashboard(ctk.CTk):
             if not self.statusData.audio_file_path:
                 return
             self.startSimulation.configure(text="Stop", fg_color=STOP_COLOR)
+            
+            # Activar AM si corresponde
+            self.statusData.modulation_type = self.mod_type.get()
+            self.statusData.modulation_enabled = (self.statusData.modulation_type == "AM")
+
+            # Reiniciar estado AM para nueva simulación
+            self.statusData.am_initialized = False
+            self.statusData.am_phase = 0.0
+            self.statusData.am_xscale = None
+
+            
             self.statusData.is_running = True
 
             # Iniciar el stream y el ploteo en tiempo real
             self.SamplingStream.start_stream()
+            
+            # Arrancar consumidor (UI) si no está ya
+            if not self._ui_timer_running:
+                self._ui_timer_running = True
+                self.after(16, self._ui_timer)
         else:
             # PAUSE
             self.startSimulation.configure(text="Run", fg_color=RUNNING_COLOR)
@@ -262,7 +285,152 @@ class Dashboard(ctk.CTk):
                     
             print("Changes applied successfully.")
    
-   
+    def _reset_ring_ui(self):
+        N = int(self.statusData.window_seconds * float(self.statusData.sample_rate))
+        N = max(1024, N)
+
+        # Ring original
+        self.statusData.ring = np.zeros(N, dtype=np.float32)
+        x1 = np.arange(N)
+        self.line1.set_data(x1, self.statusData.ring)
+        self.ax1.set_xlim(0, N)
+        self.ax1.set_ylim(-1.1, 1.1)
+        self.canvas1.draw_idle()
+
+        # Ring modulado
+        self.statusData.mod_ring = np.zeros(N, dtype=np.float32)
+        x2 = np.arange(N)
+        self.line2.set_data(x2, self.statusData.mod_ring)
+        self.ax2.set_xlim(0, N)
+        self.ax2.set_ylim(-1.1, 1.1)
+        self.canvas2.draw_idle()
+
+        # Ring demodulado
+        self.statusData.demod_ring = np.zeros(N, dtype=np.float32)
+        x3 = np.arange(N)
+        self.line3.set_data(x3, self.statusData.demod_ring)
+        self.ax3.set_xlim(0, N)
+        self.ax3.set_ylim(-1.1, 1.1)
+        self.canvas3.draw_idle()
+
+        # Reiniciar estado AM para nueva Fs
+        self.statusData.am_initialized = False
+        self.statusData.am_phase = 0.0
+        self.statusData.am_xscale = None
+
+
+
+    def _ui_timer(self):
+        drained = False
+
+        # SR cambiado => reajustar y reiniciar estado AM
+        if getattr(self.statusData, "needs_reset", False):
+            self.statusData.needs_reset = False
+            self._reset_ring_ui()
+
+        # Drenar cola de entrada (puede haber varios chunks por tick)
+        while True:
+            try:
+                chunk = self.statusData.q.get_nowait()
+            except queue.Empty:
+                break
+
+            drained = True
+
+            # --- 1) Actualizar ring ORIGINAL ---
+            ring = self.statusData.ring
+            if len(chunk) >= len(ring):
+                ring[:] = chunk[-len(ring):]
+            else:
+                L = len(chunk)
+                ring[:-L] = ring[L:]
+                ring[-L:] = chunk
+
+            # --- 2) MODULACIÓN AM (si está activa) ---
+            s_mod = None
+            if self.statusData.modulation_enabled and self.statusData.modulation_type == "AM":
+                if not self.statusData.am_initialized:
+                    state0 = am_prepare_state(
+                        first_chunk=chunk.astype(np.float32),
+                        Fs=float(self.statusData.sample_rate),
+                        fc=self.statusData.am_fc,
+                        mu=float(self.statusData.am_mu),
+                        Ac=self.statusData.am_Ac
+                    )
+                    self.statusData.am_fc = state0["fc"]
+                    self.statusData.am_mu = state0["mu"]
+                    self.statusData.am_Ac = state0["Ac"]
+                    self.statusData.am_phase = state0["phase"]
+                    self.statusData.am_xscale = state0["xscale"]
+                    self.statusData.am_initialized = True
+
+                state_blk = {
+                    "fc":    float(self.statusData.am_fc),
+                    "mu":    float(self.statusData.am_mu),
+                    "Ac":    float(self.statusData.am_Ac),
+                    "phase": float(self.statusData.am_phase),
+                    "xscale":float(self.statusData.am_xscale),
+                }
+
+                s_mod, state_blk = am_modulate_block(
+                    x=chunk.astype(np.float32),
+                    Fs=float(self.statusData.sample_rate),
+                    state=state_blk
+                )
+                # Persistir fase acumulada
+                self.statusData.am_phase = state_blk["phase"]
+
+                # Actualizar ring MODULADO
+                mring = self.statusData.mod_ring
+                if len(s_mod) >= len(mring):
+                    mring[:] = s_mod[-len(mring):]
+                else:
+                    Lm = len(s_mod)
+                    mring[:-Lm] = mring[Lm:]
+                    mring[-Lm:] = s_mod
+
+            # --- 3) DEMODULACIÓN AM (si hay modulada y AM activa) ---
+            if s_mod is not None:
+                s_demod = am_demodulate_block(
+                    s=s_mod,
+                    Fs=float(self.statusData.sample_rate),
+                    state={
+                        "fc": float(self.statusData.am_fc),
+                        "mu": float(self.statusData.am_mu),
+                        "Ac": float(self.statusData.am_Ac),
+                    },
+                    method=self.statusData.demod_method,  # "envelope" por defecto
+                    smooth_frac=0.15
+                )
+
+                dring = self.statusData.demod_ring
+                if len(s_demod) >= len(dring):
+                    dring[:] = s_demod[-len(dring):]
+                else:
+                    Ld = len(s_demod)
+                    dring[:-Ld] = dring[Ld:]
+                    dring[-Ld:] = s_demod
+
+        # --- 4) Pintar si hubo datos ---
+        if drained:
+            self.line1.set_ydata(self.statusData.ring)
+            if self.statusData.modulation_enabled and self.statusData.modulation_type == "AM":
+                self.line2.set_ydata(self.statusData.mod_ring)
+                self.line3.set_ydata(self.statusData.demod_ring)
+            self.canvas1.draw_idle()
+            self.canvas2.draw_idle()
+            self.canvas3.draw_idle()
+
+        # Reprogramar
+        if self.statusData.is_running and not self.statusData.paused:
+            self.after(16, self._ui_timer)
+        else:
+            self._ui_timer_running = False
+
+
+
+
+
     def add_toolbar_right(self, parent_grid, canvas, row:int):
         
         #TODO: FIX TOOLBAR SIZE ISSUE
@@ -297,25 +465,39 @@ class Dashboard(ctk.CTk):
             plots_frame.grid_columnconfigure(1, weight=0, minsize=36)  # toolbar
 
         # Original Signal Plot
-        # TODO: Line does not update when audio is playing
         self.canvas1 = FigureCanvasTkAgg(original, master=plots_frame)
         self.canvas1.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=0, pady=(5, 5))
         self.ax1 = original.axes[0] if original.axes else original.add_subplot(111)
-        self.line1, = self.ax1.plot(np.zeros_like(self.statusData.ring), color='cyan', animated=False)
+
+        x = np.arange(len(self.statusData.ring))
+        self.line1, = self.ax1.plot(x, self.statusData.ring, color='cyan', animated=False)
         self.ax1.set_xlim(0, len(self.statusData.ring))
         self.ax1.set_ylim(-1.1, 1.1)
         self.canvas1.draw()
         self.tb1 = self.add_toolbar_right(plots_frame, self.canvas1, row=0)
 
+
         # Modulated Signal Plot
         self.canvas2 = FigureCanvasTkAgg(modulated, master=plots_frame)
         self.canvas2.get_tk_widget().grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 5))
+        self.ax2 = modulated.axes[0] if modulated.axes else modulated.add_subplot(111)
+
+        x2 = np.arange(len(self.statusData.mod_ring))
+        self.line2, = self.ax2.plot(x2, self.statusData.mod_ring, color='orange', animated=False)
+        self.ax2.set_xlim(0, len(self.statusData.mod_ring))
+        self.ax2.set_ylim(-1.1, 1.1)
         self.canvas2.draw()
         self.tb2 = self.add_toolbar_right(plots_frame, self.canvas2, row=1)
 
-        # Demodulated Signal Plot
+
+         # Demodulated Signal Plot
         self.canvas3 = FigureCanvasTkAgg(demodulated, master=plots_frame)
         self.canvas3.get_tk_widget().grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        self.ax3 = demodulated.axes[0] if demodulated.axes else demodulated.add_subplot(111)
+        x3 = np.arange(len(self.statusData.demod_ring))
+        self.line3, = self.ax3.plot(x3, self.statusData.demod_ring, color='magenta', animated=False)
+        self.ax3.set_xlim(0, len(self.statusData.demod_ring))
+        self.ax3.set_ylim(-1.1, 1.1)
         self.canvas3.draw()
         self.tb3 = self.add_toolbar_right(plots_frame, self.canvas3, row=2)
 
