@@ -28,7 +28,7 @@ class AppState:
     
     # --- Modulación en tiempo real (plot 2) ---
     modulation_enabled: bool = True       # ON por defecto (si mod_type es AM)
-    modulation_type: str = "AM"           # AM | FM | ASK | FSK (por ahora AM)
+    modulation_type: str | None = None       # AM | FM | ASK | FSK (por ahora AM)
     mod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))
     demod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))
     demod_method: str = "envelope"            # "envelope" | "coherent"
@@ -41,4 +41,7 @@ class AppState:
     am_phase: float = 0.0            # fase acumulada (rad), para continuidad
     am_xscale: float | None = None   # escala fija de la señal (pico robusto del 1er chunk)
 
-        
+    # ... LPF demodulación AM 
+    am_lp_cut_hz: float | None = None   # corte LPF demod (Hz)
+    am_lp_ym1: float = 0.0              # estado y[n-1] del LPF de 1 polo
+    

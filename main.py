@@ -1,7 +1,7 @@
 #############################################################################################################                                 
 #                                  Intituto Tecnologico de Costa Rica                                       #
 #                         Proyecto de Aplicación de Ingeniería en Computadores                              #
-#                                                                                                           #
+#                                                                                                          #
 #                                        ModuTEC Simulator                                                  #
 #                                                                                                           #
 #                        Developed by: Mauricio Calderon Chavarria - 2019182667                             #

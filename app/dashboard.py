@@ -13,6 +13,7 @@ from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulat
 from app.ui.SamplingStream import SamplingStream
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from CTkMessagebox import CTkMessagebox
 
         
 class Dashboard(ctk.CTk):
@@ -35,10 +36,10 @@ class Dashboard(ctk.CTk):
         self.navbar_panel()
         self.display_signals()
         self.left_sidebar_panel()
-        
+        self.right_overview_panel()
+        self.right_results_panel()
         self._ui_timer_running = False
-        self.statusData.paused = True  # asegurar estado consistente al iniciar
-        self.statusData.is_running = False
+
 
 
 
@@ -80,16 +81,16 @@ class Dashboard(ctk.CTk):
         self.mainArea.pack(side="right", fill="both", expand=True)
 
         # Right Sidebar Frame
-        self.rightsidebar = ctk.CTkFrame(self.mainArea, fg_color=MAIN_BACKGROUND_COLOR, width=200, height=500)
-        self.rightsidebar.pack(side="right", pady=(10, 10), padx=(10, 10), fill="x")
+        self.rightsidebar = ctk.CTkFrame(self.mainArea, fg_color=MAIN_BACKGROUND_COLOR, width=200)  # ← sin height
+        self.rightsidebar.pack(side="right", fill="y", padx=(10, 10), pady=(10, 10))  # ← fill="y"
 
         # Right Sidebar Sub-frame for current configuration
         self.currentConfig = ctk.CTkFrame(self.rightsidebar, fg_color=SIDEBAR_COLOR, width=250, height=250)
         self.currentConfig.pack(side="top", pady=(2, 10), fill="x")
 
         # Right Sidebar Sub-frame for results logs
-        self.resultsArea = ctk.CTkFrame(self.rightsidebar, fg_color=SIDEBAR_COLOR, width=250, height=600)
-        self.resultsArea.pack(pady=(2, 10), fill="x")
+        self.resultsArea = ctk.CTkFrame(self.rightsidebar, fg_color=SIDEBAR_COLOR, width=250)
+        self.resultsArea.pack(fill="both", expand=True, pady=(2, 10))
     
     
     # Creates and configures the navigation bar buttons and layout. 
@@ -121,6 +122,69 @@ class Dashboard(ctk.CTk):
         self.startSimulation.pack(side="right", padx=5, pady=5)
 
 
+    # Right Sidebar Overview Panel
+    def right_overview_panel(self):
+        for widget in self.currentConfig.winfo_children():
+            widget.destroy()
+        
+        labelFont = ctk.CTkFont(family='FontAwesome', size=12)
+        labelTitleFont = ctk.CTkFont(family='FontAwesome', size=12, weight="bold")
+        titleFont = ctk.CTkFont(family='FontAwesome', size=18, weight="bold")
+    
+        ctk.CTkLabel(self.currentConfig, text="Simulation Overview", font=titleFont, text_color="white",
+                 anchor="center", justify="center").pack(pady=(5, 10), padx=10, anchor="center")
+
+        # Crear un frame para el grid de overview
+        overview_grid = ctk.CTkFrame(self.currentConfig, fg_color=SIDEBAR_COLOR)
+        overview_grid.pack(padx=10, pady=(0, 10), fill="x")
+
+        # Configurar 2 columnas y 4 filas
+        for i in range(4):
+            overview_grid.grid_rowconfigure(i, weight=1)
+        for j in range(2):
+            overview_grid.grid_columnconfigure(j, weight=1)
+            
+        if self.statusData.audio_file_path == None and self.statusData.modulation_type.get() == "Select type":
+            filename = "No file loaded"
+            mod_type = "Not selected"
+        else:
+            filename = os.path.basename(self.statusData.audio_file_path)
+            mod_type = self.statusData.modulation_type.get()
+            
+        # Ejemplo de widgets en el grid
+        ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",anchor="center", justify="center").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white", anchor="center", justify="center").grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white").grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Sample Rate: " + str(self.statusData.sample_rate), font=labelFont, text_color="white").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Bitrate: " + str(self.statusData.am_mu), font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Carrier Frequency: " + str(self.statusData.am_fc), font=labelFont, text_color="white").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Carrier Amplitude: " + str(self.statusData.am_Ac), font=labelFont, text_color="white").grid(row=3, column=1, sticky="w", padx=5, pady=2)
+    
+    
+    
+    # Right Sidebar Results Panel
+    def right_results_panel(self):
+        #for w in self.resultsArea.winfo_children(): w.destroy()
+
+        titleFont = ctk.CTkFont(family='FontAwesome', size=18, weight="bold")
+        ctk.CTkLabel(self.resultsArea, text="Results Log", font=titleFont,
+                    text_color="white").pack(pady=(5, 8), padx=10)
+
+    
+        self.results_text = ctk.CTkTextbox(self.resultsArea, wrap="word", bg_color=SIDEBAR_COLOR, fg_color=SIDEBAR_COLOR,
+                                           font=ctk.CTkFont(family='FontAwesome', size=12), border_width=0)
+        self.results_text.pack(fill="both", expand=True, padx=10, pady=(0,10))
+        self.results_text.configure(state="disabled")   # inicia solo lectura
+
+    def log_result(self, msg: str, color: str = "white"):
+        self.results_text.configure(state="normal")
+        self.results_text.insert("end", msg + "\n")
+        self.results_text.tag_add(color, "end-2l", "end-1l")
+        self.results_text.tag_config(color, foreground=color)
+        self.results_text.see("end")
+        self.results_text.configure(state="disabled")
+        
     # Creates and configures the left sidebar with options and controls.
     def left_sidebar_panel(self):
 
@@ -144,8 +208,8 @@ class Dashboard(ctk.CTk):
 
         # Modulation Type Dropdown
         ctk.CTkLabel(self.optionsHeader, text="Select Modulation Type", font=labelFont, text_color="white").pack(padx=10, anchor="w")
-        self.mod_type = ctk.StringVar(value="AM")
-        self.mod_dropdown = ctk.CTkOptionMenu(self.optionsHeader, variable=self.mod_type, values=["AM", "FM", "ASK", "FSK"], command=self.custom_options)
+        self.statusData.modulation_type = ctk.StringVar(value="Select type")
+        self.mod_dropdown = ctk.CTkOptionMenu(self.optionsHeader, variable=self.statusData.modulation_type, values=["AM", "FM", "ASK", "FSK"], command=self.custom_options)
         self.mod_dropdown.pack(padx=10, pady=(0, 15))
         
         
@@ -178,10 +242,6 @@ class Dashboard(ctk.CTk):
             if not self.statusData.audio_file_path:
                 return
             self.startSimulation.configure(text="Stop", fg_color=STOP_COLOR)
-            
-            # Activar AM si corresponde
-            self.statusData.modulation_type = self.mod_type.get()
-            self.statusData.modulation_enabled = (self.statusData.modulation_type == "AM")
 
             # Reiniciar estado AM para nueva simulación
             self.statusData.am_initialized = False
@@ -236,38 +296,89 @@ class Dashboard(ctk.CTk):
 
         for widget in self.optionsMenu.winfo_children():
             widget.destroy()
+            
         
         #TODO : ADD CUSTOM OPTIONS LOGIC HERE
         if value == "AM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate AM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
+
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency AM", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
+
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude AM", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+            ctk.CTkLabel(self.optionsMenu, text="Modulation Index AM", text_color="white").pack(padx=10, anchor="w")
+            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
+
         elif value == "FM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate FM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
-        elif value == "ASK":
-            ctk.CTkLabel(self.optionsMenu, text="Sample Rate ASK", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
-            self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
-        elif value == "FSK":
-            ctk.CTkLabel(self.optionsMenu, text="Sample Rate FSK", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
-            self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
 
-        '''
-        ctk.CTkLabel(self.sidebar, text="Carrier Signal Frequency", font=labelFont, text_color="white").pack(padx=10, anchor="w")
-        self.carrier_freq_input = ctk.CTkEntry(self.sidebar, placeholder_text="100000")
-        self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
-        '''
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency FM", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
 
-    # Function to apply changes to the current simulation settings.
-    
-    def applyChanges(self): 
-        if self.statusData.audio_file_path:
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude FM", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
             
+            ctk.CTkLabel(self.optionsMenu, text="Modulation Index FM", text_color="white").pack(padx=10, anchor="w")
+            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+        elif value == "ASK":
+            ctk.CTkLabel(self.optionsMenu, text="Sample Rate ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
+
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+            ctk.CTkLabel(self.optionsMenu, text="Bitrate ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
+            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100-5000")
+            self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+        elif value == "FSK":
+            
+            ctk.CTkLabel(self.optionsMenu, text="Sample Rate FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
+        
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
+
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
+
+            ctk.CTkLabel(self.optionsMenu, text="Bitrate FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
+            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100-5000")
+            self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
+        
+    # Function to apply changes to the current simulation settings.
+
+    def applyChanges(self):
+
+        if self.statusData.audio_file_path and (self.statusData.modulation_type.get() != "Select type"):
+            print("Modulation type:", self.statusData.modulation_type.get())
             sample_rate, data = wavfile.read(self.statusData.audio_file_path)
 
+            # Actualizar parámetros según entradas del usuario
+            self.right_overview_panel()
+            
             # Si es estéreo, toma canal 0 (solo para leer SR y mostrar en UI)
             if len(data.shape) > 1:
                 data = data[:, 0]
@@ -284,6 +395,8 @@ class Dashboard(ctk.CTk):
                     pass
                     
             print("Changes applied successfully.")
+        else :
+            CTkMessagebox(title="Error", message="No audio file loaded or modulation type not selected.", icon="warning")
    
     def _reset_ring_ui(self):
         N = int(self.statusData.window_seconds * float(self.statusData.sample_rate))
@@ -339,6 +452,7 @@ class Dashboard(ctk.CTk):
 
             # --- 1) Actualizar ring ORIGINAL ---
             ring = self.statusData.ring
+            self.log_result(f"Chunk with {len(chunk)} samples processed.", color="#00FF00")
             if len(chunk) >= len(ring):
                 ring[:] = chunk[-len(ring):]
             else:
@@ -348,7 +462,7 @@ class Dashboard(ctk.CTk):
 
             # --- 2) MODULACIÓN AM (si está activa) ---
             s_mod = None
-            if self.statusData.modulation_enabled and self.statusData.modulation_type == "AM":
+            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
                 if not self.statusData.am_initialized:
                     state0 = am_prepare_state(
                         first_chunk=chunk.astype(np.float32),
@@ -362,7 +476,10 @@ class Dashboard(ctk.CTk):
                     self.statusData.am_Ac = state0["Ac"]
                     self.statusData.am_phase = state0["phase"]
                     self.statusData.am_xscale = state0["xscale"]
+                    self.statusData.am_lp_cut_hz = state0.get("lp_cut_hz", self.statusData.am_lp_cut_hz)
+                    self.statusData.am_lp_ym1    = 0.0
                     self.statusData.am_initialized = True
+                    
 
                 state_blk = {
                     "fc":    float(self.statusData.am_fc),
@@ -391,17 +508,25 @@ class Dashboard(ctk.CTk):
 
             # --- 3) DEMODULACIÓN AM (si hay modulada y AM activa) ---
             if s_mod is not None:
+                demod_state = {
+                    "fc": float(self.statusData.am_fc),
+                    "mu": float(self.statusData.am_mu),
+                    "Ac": float(self.statusData.am_Ac),
+                    # <<< NUEVO: LPF >>>
+                    "lp_cut_hz": float(self.statusData.am_lp_cut_hz if self.statusData.am_lp_cut_hz else 4000.0),
+                    "lp_ym1": float(self.statusData.am_lp_ym1),
+                }
+
                 s_demod = am_demodulate_block(
                     s=s_mod,
                     Fs=float(self.statusData.sample_rate),
-                    state={
-                        "fc": float(self.statusData.am_fc),
-                        "mu": float(self.statusData.am_mu),
-                        "Ac": float(self.statusData.am_Ac),
-                    },
+                    state=demod_state,          # <- el dict se actualiza in-place
                     method=self.statusData.demod_method,  # "envelope" por defecto
-                    smooth_frac=0.15
+                    smooth_frac=0.10            # (ya no se usa en envelope con 1 polo)
                 )
+
+                # <<< NUEVO: persistir memoria del LPF
+                self.statusData.am_lp_ym1 = demod_state.get("lp_ym1", self.statusData.am_lp_ym1)
 
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):
@@ -414,7 +539,7 @@ class Dashboard(ctk.CTk):
         # --- 4) Pintar si hubo datos ---
         if drained:
             self.line1.set_ydata(self.statusData.ring)
-            if self.statusData.modulation_enabled and self.statusData.modulation_type == "AM":
+            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
                 self.line2.set_ydata(self.statusData.mod_ring)
                 self.line3.set_ydata(self.statusData.demod_ring)
             self.canvas1.draw_idle()
@@ -431,20 +556,18 @@ class Dashboard(ctk.CTk):
 
 
 
-    def add_toolbar_right(self, parent_grid, canvas, row:int):
-        
-        #TODO: FIX TOOLBAR SIZE ISSUE
+    def add_toolbar_right(self, parent_grid, canvas, row:int, pady=(0,0)):
         
         holder = ctk.CTkFrame(parent_grid, fg_color=MAIN_BACKGROUND_COLOR, width=44)
-        holder.grid(row=row, column=1, sticky="ns", padx=0, pady=0)
+        holder.grid(row=row, column=1, sticky="ns", padx=0, pady=67)  
         parent_grid.grid_columnconfigure(1, weight=0, minsize=44)
 
+        holder.grid_rowconfigure(0, weight=1)  # ayuda a estirar en alto
         tb = VerticalRightToolbar(canvas, holder)
         tb.update()
-       
-    
         tb.grid(row=0, column=0, sticky="ns", padx=0, pady=0)
         return tb
+
 
     # Displays the original, modulated, and demodulated signal plots in the main area.
     def display_signals(self):
