@@ -228,11 +228,20 @@ class Dashboard(ctk.CTk):
         else:
             self.statusData.audio_file_path = file_path
 
+        # Calculate the recommended params 
+        
+        self.audioController.recommend_params()
+        
+        
         # Update song name label
         if hasattr(self, "songName") and self.songName:
             self.songName.configure(
                 text=os.path.basename(self.statusData.audio_file_path) if self.statusData.audio_file_path else "Load a song..."
             )
+            
+        #TODO AGREGAR ACA QUE SE CALCULEN LOS VALORES PARA LA MODULACION
+        
+        
     
     
     # Function to handle the Start/Stop simulation button logic and UI updates.
@@ -301,71 +310,71 @@ class Dashboard(ctk.CTk):
         #TODO : ADD CUSTOM OPTIONS LOGIC HERE
         if value == "AM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate AM", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency AM", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_am_fc)
             self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude AM", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_am_Ac)
             self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
             
             ctk.CTkLabel(self.optionsMenu, text="Modulation Index AM", text_color="white").pack(padx=10, anchor="w")
-            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_am_mu)
             self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
 
         elif value == "FM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate FM", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency FM", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fm_fc)
             self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude FM", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fm_Ac)
             self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
             
             ctk.CTkLabel(self.optionsMenu, text="Modulation Index FM", text_color="white").pack(padx=10, anchor="w")
-            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fm_beta)
             self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
             
         elif value == "ASK":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
             
             ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_ask_fc)
             self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_ask_Ac)
             self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
             
             ctk.CTkLabel(self.optionsMenu, text="Bitrate ASK (OOK)", text_color="white").pack(padx=10, anchor="w")
-            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100-5000")
+            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_ask_bitrate)
             self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
             
         elif value == "FSK":
             
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
-            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="44100")
+            self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
         
             ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100000")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_fc)
             self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="1.0")
+            self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_Ac)
             self.carrier_amp_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Bitrate FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
-            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text="100-5000")
+            self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_bitrate)
             self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
         
     # Function to apply changes to the current simulation settings.
@@ -393,7 +402,13 @@ class Dashboard(ctk.CTk):
                 except Exception:
                     print("Failed to update sample rate in the UI.")
                     pass
-                    
+            print("Valores para la simulacion elegidos")
+            print(self.sample_rate_input.get())
+            print(self.carrier_freq_input.get())
+            print(self.carrier_amp_input.get())
+            print(self.modulation_index_input.get())
+            print(self.bitrate_input.get())
+            
             print("Changes applied successfully.")
         else :
             CTkMessagebox(title="Error", message="No audio file loaded or modulation type not selected.", icon="warning")
@@ -462,24 +477,13 @@ class Dashboard(ctk.CTk):
 
             # --- 2) MODULACIÓN AM (si está activa) ---
             s_mod = None
+
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
                 if not self.statusData.am_initialized:
-                    state0 = am_prepare_state(
-                        first_chunk=chunk.astype(np.float32),
-                        Fs=float(self.statusData.sample_rate),
-                        fc=self.statusData.am_fc,
-                        mu=float(self.statusData.am_mu),
-                        Ac=self.statusData.am_Ac
-                    )
-                    self.statusData.am_fc = state0["fc"]
-                    self.statusData.am_mu = state0["mu"]
-                    self.statusData.am_Ac = state0["Ac"]
-                    self.statusData.am_phase = state0["phase"]
-                    self.statusData.am_xscale = state0["xscale"]
-                    self.statusData.am_lp_cut_hz = state0.get("lp_cut_hz", self.statusData.am_lp_cut_hz)
-                    self.statusData.am_lp_ym1    = 0.0
+                    xscale = am_prepare_state(first_chunk=chunk.astype(np.float32))
+                    self.statusData.am_xscale = float(xscale)
+                    self.statusData.am_phase = 0.0
                     self.statusData.am_initialized = True
-                    
 
                 state_blk = {
                     "fc":    float(self.statusData.am_fc),
@@ -494,7 +498,6 @@ class Dashboard(ctk.CTk):
                     Fs=float(self.statusData.sample_rate),
                     state=state_blk
                 )
-                # Persistir fase acumulada
                 self.statusData.am_phase = state_blk["phase"]
 
                 # Actualizar ring MODULADO
@@ -512,21 +515,13 @@ class Dashboard(ctk.CTk):
                     "fc": float(self.statusData.am_fc),
                     "mu": float(self.statusData.am_mu),
                     "Ac": float(self.statusData.am_Ac),
-                    # <<< NUEVO: LPF >>>
-                    "lp_cut_hz": float(self.statusData.am_lp_cut_hz if self.statusData.am_lp_cut_hz else 4000.0),
-                    "lp_ym1": float(self.statusData.am_lp_ym1),
                 }
 
                 s_demod = am_demodulate_block(
                     s=s_mod,
                     Fs=float(self.statusData.sample_rate),
-                    state=demod_state,          # <- el dict se actualiza in-place
-                    method=self.statusData.demod_method,  # "envelope" por defecto
-                    smooth_frac=0.10            # (ya no se usa en envelope con 1 polo)
+                    state=demod_state,          
                 )
-
-                # <<< NUEVO: persistir memoria del LPF
-                self.statusData.am_lp_ym1 = demod_state.get("lp_ym1", self.statusData.am_lp_ym1)
 
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):

@@ -2,41 +2,12 @@ import numpy as np
 
 _TWO_PI = 2.0*np.pi
 
-def am_prepare_state(first_chunk: np.ndarray, Fs: float,
-                     fc: float | None, mu: float, Ac: float | None):
-    """
-    Decide parámetros fijos de AM a partir del primer bloque.
-    - No normaliza por-bloque en adelante: congela xscale, fc, Ac.
-    - Fase inicial = 0 (la iremos acumulando por bloque).
-    Devuelve: dict con {'fc','mu','Ac','phase','xscale'}
-    """
-    # Escala fija (no re-normalizar por bloque)
+def am_prepare_state(first_chunk: np.ndarray):
+    
     xscale = robust_peak(first_chunk) + 1e-12
 
-    # Portadora fija
-    if fc is None:
-        fmax = estimate_fmax_fft(first_chunk, Fs)
-        fc = min(0.25*Fs, max(100.0, 10.0*fmax))
-
-    # Amplitud de portadora fija
-    if Ac is None:
-        Ac = 0.7 * (robust_peak(first_chunk / xscale))
-
-    if 'lp_cut_hz' not in locals():
-        fmax = estimate_fmax_fft(first_chunk, Fs)
-        lp_cut_hz = min(0.45*Fs, max(200.0, 2.0*fmax)) 
-        
-        
-    mu = float(np.clip(mu, 0.0, 1.0))
-
-    return {
-        'fc': float(fc),
-        'mu': mu,
-        'Ac': float(Ac),
-        'phase': 0.0,      # radianes
-        'lp_cut_hz': float(lp_cut_hz),
-        'xscale': float(xscale)
-    }
+    return float(xscale)
+    
 
 def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray, dict]:
     """
@@ -76,8 +47,7 @@ def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray
     state_updated['phase'] = ph1
     return s, state_updated
 
-def am_demodulate_block(s: np.ndarray, Fs: float, state: dict,
-                        method: str = "coherent", smooth_frac: float = 0.15) -> np.ndarray:
+def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: float = 0.15) -> np.ndarray:
     """
     Demodula un bloque usando los mismos parámetros fijados en 'state'.
     Sin re-normalización por bloque (solo un re-escalado final para visual).
@@ -91,46 +61,16 @@ def am_demodulate_block(s: np.ndarray, Fs: float, state: dict,
     samples_per_cycle = max(1, int(Fs / max(1.0, fc)))
     M = max(1, int(samples_per_cycle * smooth_frac))
 
-    if method.lower() == "coherent":
-        v = (2.0 * s * carrier).astype(np.float32)
-        base = moving_average(v, M)
-        base = base - np.mean(base)
-        scale = (mu*Ac) if (mu*Ac) > 1e-9 else 1.0
-        demod = (base / scale).astype(np.float32)
-    else:
-        
-        env = np.abs(s).astype(np.float32)
-
-        # 2) LPF de 1 polo (estado persistente entre bloques)
-        cut = float(state.get('lp_cut_hz', min(0.45*Fs, 4000.0)))
-        y_prev = float(state.get('lp_ym1', 0.0))
-        env_lp, y_last = one_pole_lpf_block(env, Fs, cut, y_prev)
-        state['lp_ym1'] = y_last  # <- persistimos memoria del filtro
-
-        # 3) Re-escalado a baseband (quitar DC y normalizar por mu y Ac)
-        denom = (mu * (Ac + 1e-12))
-        base = (env_lp / (Ac + 1e-12)) - 1.0
-        demod = (base / (mu if denom > 1e-12 else 1.0)).astype(np.float32)
-
-
+    v = (2.0 * s * carrier).astype(np.float32)
+    base = moving_average(v, M)
+    base = base - np.mean(base)
+    scale = (mu*Ac) if (mu*Ac) > 1e-9 else 1.0
+    demod = (base / scale).astype(np.float32)
+  
     # Solo para visual estable (no “respirar” por bloque)
     demod = demod / (np.max(np.abs(demod)) + 1e-12)
+    
     return demod
-
-def one_pole_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, y_prev: float) -> tuple[np.ndarray, float]:
-    """
-    LPF de 1 polo: y[n] = y[n-1] + alpha*(x[n]-y[n-1]),
-    alpha = 1 - exp(-2*pi*fc/Fs). Devuelve (y, y_ultimo).
-    """
-    fc = max(1.0, float(fc_hz))
-    alpha = 1.0 - np.exp(-2.0*np.pi*fc/float(Fs))
-    y = np.empty_like(x, dtype=np.float32)
-    y_last = float(y_prev)
-    for i in range(len(x)):
-        y_last = y_last + alpha*(float(x[i]) - y_last)
-        y[i] = y_last
-    return y, y_last
-
 
 # ==========================
 # Utilidades

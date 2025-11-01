@@ -5,43 +5,73 @@ from dataclasses import dataclass, field
 
 @dataclass
 class AppState:
-    audio_file_path: str | None = None
-    sample_rate: int = 44100
-    window_seconds: float = 2.0
-    block_size: int = 2048
+    
+    # --- Audio file and stream parameters ---
+    
+    audio_file_path: str | None = None                                                           # Audio file path
+    sample_rate: int = 44100                                                                     # Sample rate
+    fmax: int = sample_rate/4
+    window_seconds: float = 2.0                                                                  # Window (Graph) size in seconds
+    block_size: int = 2048                                                                       # Block size for audio processing
 
+    # --- Audio data buffers and queues ---
+    
+    q: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))                      # Queue for audio data blocks
+    ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))        # Ring buffer for original audio data (2 seconds max)
+    mod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))    # Ring buffer for modulated audio data (2 seconds max)
+    demod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))  # Ring buffer for demodulated audio data (2 seconds max)
 
-    ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))
-    q: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
-
-    reader_thread: object = None
-    stop_reader: bool = False
-    paused: bool = True
-    pos_frames: int = 0
-    timer_active: bool = False
-    sd_stream: object = None
-    sd_device: object = None
-    audio_channels: int = 1
-    is_running: bool = False
-    needs_reset: bool = False
+    # --- Audio playback and processing state ---
+    
+    reader_thread: object = None                                                                 # Thread for reading audio file
+    stop_reader: bool = False                                                                    # Flag to stop reader thread
+    paused: bool = True                                                                          # Playback paused state
+    pos_frames: int = 0                                                                          # Current position in frames
+    timer_active: bool = False                                                                   # Timer active state
+    sd_stream: object = None #TODO INACTIVO                                                           # Sounddevice stream object
+    sd_device: object = None #TODO INACTIVO                                                           # Sounddevice device info
+    audio_channels: int = 1                                                                      # Number of audio channels
+    is_running: bool = False                                                                     # Is the audio processing running
+    needs_reset: bool = False #TODO NO ESTA SIRVIENDO                                                 # Flag to reset state
     
     
-    # --- Modulación en tiempo real (plot 2) ---
-    modulation_enabled: bool = True       # ON por defecto (si mod_type es AM)
-    modulation_type: str | None = None       # AM | FM | ASK | FSK (por ahora AM)
-    mod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))
-    demod_ring: np.ndarray = field(default_factory=lambda: np.zeros(44100*2, dtype=np.float32))
-    demod_method: str = "envelope"            # "envelope" | "coherent"
+    # --- Recommended modulation parameters ---
+    recommended_Fs: int = 0
     
-    # --- AM streaming state (persistente para toda la sesión) ---
-    am_initialized: bool = False     # True después del 1er chunk
-    am_fc: float | None = None       # portadora fijada al iniciar
-    am_mu: float = 0.8               # índice de modulación fijado al iniciar (o el que uses)
-    am_Ac: float | None = None       # amplitud de portadora fijada al iniciar
-    am_phase: float = 0.0            # fase acumulada (rad), para continuidad
-    am_xscale: float | None = None   # escala fija de la señal (pico robusto del 1er chunk)
+    recommended_am_fc: int = 0
+    recommended_am_Ac: float = 0.0
+    recommended_am_mu: float = 0.0
+    
+    recommended_fm_fc: int = 0
+    recommended_fm_Ac: float = 0.0
+    recommended_fm_beta: float = 0.0
+    
+    recommended_ask_fc: int = 0
+    recommended_ask_Ac: float = 0.0
+    recommended_ask_bitrate: float = 0.0
+    
+    recommended_fsk_fc: int = 0
+    recommended_fsk_Ac: float = 0.0
+    recommended_fsk_bitrate: float = 0.0
+    
+    
+    
+    
+    # --- Modulation / Demodulation parameters ---
+    
+    modulation_enabled: bool = True                                                              # Enable modulation/demodulation
+    modulation_type: str | None = None                                                           # "AM" | "FM" | "ASK" | "FSK" |None
+    demod_method: str = "envelope"                                                               # "envelope" | "coherent"
+    
+    # --- AM streaming state ---
+    am_initialized: bool = False                                                                 # True after the first chunk
+    am_fc: float | None = None                                                                   # Carrier frequency set at start
+    am_mu: float = 0.8                                                                           # Modulation index set at start 
+    am_Ac: float | None = None                                                                   # Carrier amplitude set at start
+    am_phase: float = 0.0                                                                        # Accumulated phase (rad), for continuity
+    am_xscale: float | None = None                                                               # Fixed signal scale (robust peak from first chunk)
 
-    # ... LPF demodulación AM 
-    am_lp_cut_hz: float | None = None   # corte LPF demod (Hz)
-    am_lp_ym1: float = 0.0              # estado y[n-1] del LPF de 1 polo
+    # --- AM demodulation state ---
+    am_lp_cut_hz: float | None = None                                                            # Low-pass filter cutoff frequency
+    am_lp_ym1: float = 0.0                                                                       # Low-pass filter state
     
