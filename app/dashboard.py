@@ -9,9 +9,10 @@ from tkinter import filedialog
 import matplotlib.pyplot as plt
 from utils import windowCenter as wc
 from CTkMessagebox import CTkMessagebox
+from core.statistics.metrics import NCCPairer
 from app.ui.SamplingStream import SamplingStream
 from core.audio.AudioController import AudioController
-from matplotlib.ticker import MultipleLocator, AutoLocator
+from matplotlib.ticker import MultipleLocator
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
@@ -29,6 +30,9 @@ class Dashboard(ctk.CTk):
         self.SamplingStream = SamplingStream(statusData)
         
         self.audioController = AudioController(statusData)
+        
+        self.statusData.ncc_pairer = NCCPairer(maxlen=12)
+        
         
         # Initialize main panels
         
@@ -258,6 +262,12 @@ class Dashboard(ctk.CTk):
             self.statusData.am_initialized = False
             self.statusData.am_phase = 0.0
             self.statusData.am_xscale = None
+            
+            # En tu handler de "Start/Run" (donde reseteás estados AM)
+            if hasattr(self.statusData, "ncc_pairer"):
+                self.statusData.ncc_pairer = NCCPairer(maxlen=12)
+            self.statusData.chunk_seq = 0
+
 
             
             self.statusData.is_running = True
@@ -490,6 +500,10 @@ class Dashboard(ctk.CTk):
         while True:
             try:
                 chunk = self.statusData.q.get_nowait()
+                self.statusData.chunk_seq += 1
+                cid = self.statusData.chunk_seq
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
             except queue.Empty:
                 break
 
@@ -497,7 +511,6 @@ class Dashboard(ctk.CTk):
 
             # --- 1) Actualizar ring ORIGINAL ---
             ring = self.statusData.ring
-            self.log_result(f"Chunk with {len(chunk)} samples processed.", color="#00FF00")
             if len(chunk) >= len(ring):
                 ring[:] = chunk[-len(ring):]
             else:
@@ -545,6 +558,8 @@ class Dashboard(ctk.CTk):
                     "fc": float(self.statusData.am_fc),
                     "mu": float(self.statusData.am_mu),
                     "Ac": float(self.statusData.am_Ac),
+                    "fmax": float(self.statusData.fmax),         
+                    "lp_ym1": float(getattr(self.statusData, "am_lp_ym1", 0.0)),  
                 }
 
                 s_demod = am_demodulate_block(
@@ -552,6 +567,19 @@ class Dashboard(ctk.CTk):
                     Fs=float(self.statusData.sample_rate),
                     state=demod_state,          
                 )
+                
+                # Empujar DEMOD y registrar log con color según umbral
+                if self.statusData.ncc_pairer is not None:
+                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
+                    if res is not None:
+                        pct = res["percent"]
+                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
+                        color = "#00FF00" if pct >= thr else "#FF3B30"
+                        # Tu método de logging en el panel derecho:
+                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
+
+                
+                self.statusData.am_lp_ym1 = float(demod_state.get("lp_ym1", 0.0))
 
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):

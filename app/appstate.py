@@ -67,3 +67,10 @@ class AppState:
     am_Ac: float | None = None                                                                   # Carrier amplitude set at start
     am_phase: float = 0.0                                                                        # Accumulated phase (rad), for continuity
     am_xscale: float | None = None                                                               # Fixed signal scale (robust peak from first chunk)
+    am_lp_ym1: float = 0.0
+    
+    
+    # --- Métricas NCC ---
+    ncc_pairer: object = None      # instancia del NCCPairer (se inicializa en dashboard)
+    chunk_seq: int = 0             # contador incremental de chunks
+    ncc_threshold: float = 70.0    # umbral (%) para colorear log
