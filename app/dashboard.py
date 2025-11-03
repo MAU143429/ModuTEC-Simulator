@@ -8,12 +8,13 @@ from scipy.io import wavfile
 from tkinter import filedialog
 import matplotlib.pyplot as plt
 from utils import windowCenter as wc
-from core.audio.AudioController import AudioController
-from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
+from CTkMessagebox import CTkMessagebox
 from app.ui.SamplingStream import SamplingStream
+from core.audio.AudioController import AudioController
+from matplotlib.ticker import MultipleLocator, AutoLocator
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from CTkMessagebox import CTkMessagebox
+from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
 
         
 class Dashboard(ctk.CTk):
@@ -154,7 +155,8 @@ class Dashboard(ctk.CTk):
         # Ejemplo de widgets en el grid
         ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",anchor="center", justify="center").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white", anchor="center", justify="center").grid(row=0, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        #ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid,text=filename,font=labelFont,text_color="white",wraplength=180,justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white").grid(row=1, column=1, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Sample Rate: " + str(self.statusData.sample_rate), font=labelFont, text_color="white").grid(row=2, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Bitrate: " + str(self.statusData.am_mu), font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
@@ -306,8 +308,6 @@ class Dashboard(ctk.CTk):
         for widget in self.optionsMenu.winfo_children():
             widget.destroy()
             
-        
-        #TODO : ADD CUSTOM OPTIONS LOGIC HERE
         if value == "AM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate AM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
@@ -324,7 +324,10 @@ class Dashboard(ctk.CTk):
             ctk.CTkLabel(self.optionsMenu, text="Modulation Index AM", text_color="white").pack(padx=10, anchor="w")
             self.modulation_index_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_am_mu)
             self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
-
+            
+            
+            
+            
         elif value == "FM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate FM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
@@ -377,8 +380,32 @@ class Dashboard(ctk.CTk):
             self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_bitrate)
             self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
         
+    def checkOptions(self):
+        
+        # Setting the default recommended values
+        if (self.sample_rate_input.get() == ""):
+            self.statusData.sample_rate = self.statusData.recommended_Fs
+        else:
+            self.statusData.sample_rate = self.sample_rate_input.get()
+            
+        if (self.carrier_freq_input.get() == ""):
+            self.statusData.am_fc = self.statusData.recommended_am_fc
+        else: 
+            self.statusData.am_fc = self.carrier_freq_input.get()
+            
+        if (self.carrier_amp_input.get() == ""):
+            self.statusData.am_Ac = self.statusData.recommended_am_Ac
+        else:
+            self.statusData.am_Ac = self.carrier_amp_input.get()   
+                
+        if (self.modulation_index_input.get() == ""):
+            self.statusData.am_mu = self.statusData.recommended_am_mu
+        else:
+            self.statusData.am_mu = self.modulation_index_input.get()
+        
+    
+    
     # Function to apply changes to the current simulation settings.
-
     def applyChanges(self):
 
         if self.statusData.audio_file_path and (self.statusData.modulation_type.get() != "Select type"):
@@ -402,12 +429,15 @@ class Dashboard(ctk.CTk):
                 except Exception:
                     print("Failed to update sample rate in the UI.")
                     pass
+                
+            self.checkOptions()
+            
             print("Valores para la simulacion elegidos")
-            print(self.sample_rate_input.get())
-            print(self.carrier_freq_input.get())
-            print(self.carrier_amp_input.get())
-            print(self.modulation_index_input.get())
-            print(self.bitrate_input.get())
+            print(self.statusData.sample_rate)
+            print(self.statusData.am_fc)
+            print(self.statusData.am_Ac)
+            print(self.statusData.am_mu)
+            
             
             print("Changes applied successfully.")
         else :
@@ -592,7 +622,13 @@ class Dashboard(ctk.CTk):
         self.ax1.set_xlim(0, len(self.statusData.ring))
         self.ax1.set_ylim(-1.1, 1.1)
         self.canvas1.draw()
+        self.ax1.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
+        self.ax1.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))
+        self.ax1.grid(axis='x', which='minor', linestyle='--', linewidth=0.5, alpha=0.35)
+        self.ax1.grid(axis='x', which='major', linestyle='-', linewidth=0.6, alpha=0.5)
+        self.ax1.set_axisbelow(True)
         self.tb1 = self.add_toolbar_right(plots_frame, self.canvas1, row=0)
+        
 
 
         # Modulated Signal Plot
@@ -605,7 +641,13 @@ class Dashboard(ctk.CTk):
         self.ax2.set_xlim(0, len(self.statusData.mod_ring))
         self.ax2.set_ylim(-1.1, 1.1)
         self.canvas2.draw()
+        self.ax2.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
+        self.ax2.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))
+        self.ax2.grid(axis='x', which='minor', linestyle='--', linewidth=0.5, alpha=0.35)
+        self.ax2.grid(axis='x', which='major', linestyle='-', linewidth=0.6, alpha=0.5)
+        self.ax2.set_axisbelow(True)
         self.tb2 = self.add_toolbar_right(plots_frame, self.canvas2, row=1)
+        
 
 
          # Demodulated Signal Plot
@@ -617,6 +659,12 @@ class Dashboard(ctk.CTk):
         self.ax3.set_xlim(0, len(self.statusData.demod_ring))
         self.ax3.set_ylim(-1.1, 1.1)
         self.canvas3.draw()
+        self.ax3.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
+        self.ax3.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))
+        self.ax3.grid(axis='x', which='minor', linestyle='--', linewidth=0.5, alpha=0.35)
+        self.ax3.grid(axis='x', which='major', linestyle='-', linewidth=0.6, alpha=0.5)
+        self.ax3.set_axisbelow(True)
+      
+        
         self.tb3 = self.add_toolbar_right(plots_frame, self.canvas3, row=2)
-
 

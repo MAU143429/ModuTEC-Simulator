@@ -55,13 +55,10 @@ class AppState:
     recommended_fsk_bitrate: float = 0.0
     
     
-    
-    
     # --- Modulation / Demodulation parameters ---
     
     modulation_enabled: bool = True                                                              # Enable modulation/demodulation
-    modulation_type: str | None = None                                                           # "AM" | "FM" | "ASK" | "FSK" |None
-    demod_method: str = "envelope"                                                               # "envelope" | "coherent"
+    modulation_type: str | None = None                                                           # "AM" | "FM" | "ASK" | "FSK" | None                                                          # "envelope" | "coherent"
     
     # --- AM streaming state ---
     am_initialized: bool = False                                                                 # True after the first chunk
@@ -70,8 +67,3 @@ class AppState:
     am_Ac: float | None = None                                                                   # Carrier amplitude set at start
     am_phase: float = 0.0                                                                        # Accumulated phase (rad), for continuity
     am_xscale: float | None = None                                                               # Fixed signal scale (robust peak from first chunk)
-
-    # --- AM demodulation state ---
-    am_lp_cut_hz: float | None = None                                                            # Low-pass filter cutoff frequency
-    am_lp_ym1: float = 0.0                                                                       # Low-pass filter state
-    

@@ -47,7 +47,7 @@ def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray
     state_updated['phase'] = ph1
     return s, state_updated
 
-def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: float = 0.15) -> np.ndarray:
+def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: float = 0.4) -> np.ndarray:
     """
     Demodula un bloque usando los mismos parámetros fijados en 'state'.
     Sin re-normalización por bloque (solo un re-escalado final para visual).

@@ -1,5 +1,5 @@
 import numpy as np
-
+'''
 class SignalMetrics:
     @staticmethod
     def normalized_cross_correlation(original: np.ndarray, demodulated: np.ndarray) -> float:
@@ -24,3 +24,4 @@ class SignalMetrics:
         """
         ncc = SignalMetrics.normalized_cross_correlation(original, demodulated)
         return {'NCC': ncc}
+        '''
