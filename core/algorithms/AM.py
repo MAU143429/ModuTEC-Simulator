@@ -47,29 +47,37 @@ def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray
     state_updated['phase'] = ph1
     return s, state_updated
 
-def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: float = 0.4) -> np.ndarray:
-    """
-    Demodula un bloque usando los mismos parámetros fijados en 'state'.
-    Sin re-normalización por bloque (solo un re-escalado final para visual).
-    """
-    fc = state['fc']; mu = state['mu']; Ac = state['Ac']
-    mu = float(np.clip(mu, 0.0, 1.0))
-
-    n = np.arange(len(s), dtype=np.float32)
-    carrier = np.cos(_TWO_PI*fc*n/float(Fs)).astype(np.float32)
-
-    samples_per_cycle = max(1, int(Fs / max(1.0, fc)))
-    M = max(1, int(samples_per_cycle * smooth_frac))
-
-    v = (2.0 * s * carrier).astype(np.float32)
-    base = moving_average(v, M)
-    base = base - np.mean(base)
-    scale = (mu*Ac) if (mu*Ac) > 1e-9 else 1.0
-    demod = (base / scale).astype(np.float32)
-  
-    # Solo para visual estable (no “respirar” por bloque)
-    demod = demod / (np.max(np.abs(demod)) + 1e-12)
+def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: float = 0.15) -> np.ndarray:
     
+    """
+    Demodulación por envolvente (rectificación + LPF).
+    Usa filtro de 1 polo (doble pasada opcional) con estado persistente.
+    """
+    fc = float(state["fc"])
+    mu = float(np.clip(state["mu"], 0.0, 1.0))
+    Ac = float(state["Ac"])
+    fmax = float(state.get("fmax", 1000.0))
+    y_prev = float(state.get("lp_ym1", 0.0))
+
+    # 1. Rectificación (envolvente)
+    env = np.abs(s).astype(np.float32)
+
+    # 2. LPF con corte bajo para eliminar portadora
+    cut = min(0.25 * Fs, max(1.1 * fmax, fmax + 100.0))
+    env_lp, y_last = one_pole_lpf_block(env, Fs, cut, y_prev)
+    # Doble pasada para limpieza extra
+    env_lp2, y_last2 = one_pole_lpf_block(env_lp, Fs, cut, y_last)
+    state["lp_ym1"] = y_last2
+    base = env_lp2
+
+    # 3. Escalado físico y centrado
+    demod = ((base / (Ac + 1e-12)) - 1.0) / (mu + 1e-12)
+    demod = demod - np.mean(demod)
+    demod = demod.astype(np.float32)
+
+    # 4. Normalización visual [-1, 1]
+    demod = demod / (np.max(np.abs(demod)) + 1e-12)
+
     return demod
 
 # ==========================
@@ -93,3 +101,13 @@ def moving_average(x, M):
         return x.astype(np.float32, copy=True)
     kernel = np.ones(M, dtype=np.float32) / float(M)
     return np.convolve(x.astype(np.float32), kernel, mode='same')
+
+def one_pole_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, y_prev: float) -> tuple[np.ndarray, float]:
+    fc = max(1.0, float(fc_hz))
+    alpha = 1.0 - np.exp(-2.0*np.pi*fc/float(Fs))
+    y = np.empty_like(x, dtype=np.float32)
+    y_last = float(y_prev)
+    for i in range(len(x)):
+        y_last = y_last + alpha*(float(x[i]) - y_last)
+        y[i] = y_last
+    return y, y_last
