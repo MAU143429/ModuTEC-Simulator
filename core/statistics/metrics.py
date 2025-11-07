@@ -110,3 +110,14 @@ class NCCPairer:
         except ValueError: pass
 
         return result
+
+def digital_accuracy(bits_ref: np.ndarray, bits_hat: np.ndarray) -> float:
+    """
+    % de aciertos por bit. Ambos arrays 0/1 por muestra o por símbolo.
+    Si vienen por muestra, compara por muestra; si vienen por símbolo, mejor.
+    """
+    a = (bits_ref > 0.5).astype(np.uint8)
+    b = (bits_hat > 0.5).astype(np.uint8)
+    n = min(len(a), len(b))
+    if n == 0: return 0.0
+    return 100.0 * float(np.sum(a[:n] == b[:n])) / float(n)

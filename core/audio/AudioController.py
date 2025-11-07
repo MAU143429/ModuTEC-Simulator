@@ -74,7 +74,9 @@ class AudioController:
 
         self.state.recommended_fsk_bitrate = min(Fs/10, 4*fmax)
 
-        self.state.recommended_fsk_fc = min(Fs/4, max(1000, 10*self.state.recommended_fsk_bitrate))
+        self.state.recommended_fsk_fc1 = min(Fs/4, max(1000, 10*self.state.recommended_fsk_bitrate))
+        
+        self.state.recommended_fsk_fc2 = self.state.recommended_fsk_fc1 * 5
 
         self.state.recommended_fsk_Ac = 0.90
 
