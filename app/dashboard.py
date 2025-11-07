@@ -10,12 +10,18 @@ import matplotlib.pyplot as plt
 from utils import windowCenter as wc
 from CTkMessagebox import CTkMessagebox
 from core.statistics.metrics import NCCPairer
-from app.ui.SamplingStream import SamplingStream
-from core.audio.AudioController import AudioController
 from matplotlib.ticker import MultipleLocator
+from app.ui.SamplingStream import SamplingStream
+from core.statistics.metrics import digital_accuracy
+from core.audio.AudioController import AudioController
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
+from core.algorithms.FM import fm_prepare_state, fm_modulate_block, fm_demodulate_block
+from core.algorithms.ASK import ask_prepare_state, ask_modulate_block, ask_demodulate_block
+from core.algorithms.FSK import bfsk_prepare_state, bfsk_modulate_block, bfsk_demodulate_block
+
+
 
         
 class Dashboard(ctk.CTk):
@@ -44,8 +50,6 @@ class Dashboard(ctk.CTk):
         self.right_overview_panel()
         self.right_results_panel()
         self._ui_timer_running = False
-
-
 
 
     # Configures the main application window.
@@ -155,7 +159,40 @@ class Dashboard(ctk.CTk):
         else:
             filename = os.path.basename(self.statusData.audio_file_path)
             mod_type = self.statusData.modulation_type.get()
-            
+         
+         
+        ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white").grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white", wraplength=180, justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white").grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=f"Sample Rate: {self.statusData.sample_rate}", font=labelFont, text_color="white").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+
+        # dinámicos por técnica
+        if mod_type == "AM":
+            bitrate_txt = f"Index μ: {self.statusData.am_mu}"
+            fc_txt = f"{self.statusData.am_fc}"
+            Ac_txt = f"{self.statusData.am_Ac}"
+        elif mod_type == "FM":
+            bitrate_txt = f"β: {self.statusData.fm_beta}"
+            fc_txt = f"{self.statusData.fm_fc}"
+            Ac_txt = f"{self.statusData.fm_Ac}"
+        elif mod_type == "ASK":
+            bitrate_txt = f"Bitrate: {self.statusData.ask_bitrate}"
+            fc_txt = f"{self.statusData.ask_fc}"
+            Ac_txt = f"{self.statusData.ask_Ac}"
+        elif mod_type == "FSK":
+            bitrate_txt = f"Bitrate: {self.statusData.fsk_bitrate}"
+            fc_txt = f"f1: {self.statusData.fsk_fc1} / f0: {self.statusData.fsk_fc2}"
+            Ac_txt = f"{self.statusData.fsk_Ac}"
+        else:
+            bitrate_txt = "—"
+            fc_txt = "—"
+            Ac_txt = "—"
+
+        ctk.CTkLabel(overview_grid, text=bitrate_txt, font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=f"Carrier Frequency: {fc_txt}", font=labelFont, text_color="white").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=f"Carrier Amplitude: {Ac_txt}", font=labelFont, text_color="white").grid(row=3, column=1, sticky="w", padx=5, pady=2)         
+        ''' 
         # Ejemplo de widgets en el grid
         ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",anchor="center", justify="center").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white", anchor="center", justify="center").grid(row=0, column=1, sticky="w", padx=5, pady=2)
@@ -166,18 +203,15 @@ class Dashboard(ctk.CTk):
         ctk.CTkLabel(overview_grid, text="Bitrate: " + str(self.statusData.am_mu), font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Carrier Frequency: " + str(self.statusData.am_fc), font=labelFont, text_color="white").grid(row=3, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Carrier Amplitude: " + str(self.statusData.am_Ac), font=labelFont, text_color="white").grid(row=3, column=1, sticky="w", padx=5, pady=2)
-    
-    
+        '''  
     
     # Right Sidebar Results Panel
     def right_results_panel(self):
-        #for w in self.resultsArea.winfo_children(): w.destroy()
-
+        
         titleFont = ctk.CTkFont(family='FontAwesome', size=18, weight="bold")
         ctk.CTkLabel(self.resultsArea, text="Results Log", font=titleFont,
                     text_color="white").pack(pady=(5, 8), padx=10)
-
-    
+        
         self.results_text = ctk.CTkTextbox(self.resultsArea, wrap="word", bg_color=SIDEBAR_COLOR, fg_color=SIDEBAR_COLOR,
                                            font=ctk.CTkFont(family='FontAwesome', size=12), border_width=0)
         self.results_text.pack(fill="both", expand=True, padx=10, pady=(0,10))
@@ -247,8 +281,6 @@ class Dashboard(ctk.CTk):
             
         #TODO AGREGAR ACA QUE SE CALCULEN LOS VALORES PARA LA MODULACION
         
-        
-    
     
     # Function to handle the Start/Stop simulation button logic and UI updates.
     def simulation_button_animation(self):
@@ -263,13 +295,27 @@ class Dashboard(ctk.CTk):
             self.statusData.am_phase = 0.0
             self.statusData.am_xscale = None
             
+            # Reiniciar estado FM para nueva simulación
+            self.statusData.fm_initialized = False
+            self.statusData.fm_phase = 0.0
+            self.statusData.fm_xscale = None
+            self.statusData.fm_phase_unwrap_prev = 0.0
+            self.statusData.fm_lp_ym1 = 0.0
+            
+            # Reiniciar estado ASK
+            self.statusData.ask_initialized = False
+            self.statusData.ask_state = None
+            
+            # Reiniciar estado FSK
+            self.statusData.fsk_initialized = False
+            self.statusData.fsk_state = None
+
+            
             # En tu handler de "Start/Run" (donde reseteás estados AM)
             if hasattr(self.statusData, "ncc_pairer"):
                 self.statusData.ncc_pairer = NCCPairer(maxlen=12)
             self.statusData.chunk_seq = 0
 
-
-            
             self.statusData.is_running = True
 
             # Iniciar el stream y el ploteo en tiempo real
@@ -336,8 +382,6 @@ class Dashboard(ctk.CTk):
             self.modulation_index_input.pack(padx=10, pady=(0, 15), fill="x")
             
             
-            
-            
         elif value == "FM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate FM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
@@ -378,9 +422,13 @@ class Dashboard(ctk.CTk):
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
             self.sample_rate_input.pack(padx=10, pady=(0, 15), fill="x")
         
-            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
-            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_fc)
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency BFSK 1 (High)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_fc1)
             self.carrier_freq_input.pack(padx=10, pady=(0, 15), fill="x")
+            
+            ctk.CTkLabel(self.optionsMenu, text="Carrier Frequency BFSK 2 (Low)", text_color="white").pack(padx=10, anchor="w")
+            self.carrier_freq2_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_fc2)
+            self.carrier_freq2_input.pack(padx=10, pady=(0, 15), fill="x")
 
             ctk.CTkLabel(self.optionsMenu, text="Carrier Amplitude FSK (BFSK)", text_color="white").pack(padx=10, anchor="w")
             self.carrier_amp_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_Ac)
@@ -393,28 +441,73 @@ class Dashboard(ctk.CTk):
     def checkOptions(self):
         
         # Setting the default recommended values
-        if (self.sample_rate_input.get() == ""):
-            self.statusData.sample_rate = self.statusData.recommended_Fs
-        else:
-            self.statusData.sample_rate = self.sample_rate_input.get()
-            
-        if (self.carrier_freq_input.get() == ""):
-            self.statusData.am_fc = self.statusData.recommended_am_fc
-        else: 
-            self.statusData.am_fc = self.carrier_freq_input.get()
-            
-        if (self.carrier_amp_input.get() == ""):
-            self.statusData.am_Ac = self.statusData.recommended_am_Ac
-        else:
-            self.statusData.am_Ac = self.carrier_amp_input.get()   
-                
-        if (self.modulation_index_input.get() == ""):
-            self.statusData.am_mu = self.statusData.recommended_am_mu
-        else:
-            self.statusData.am_mu = self.modulation_index_input.get()
+        # Sample rate
+        self.statusData.sample_rate = (
+            self.statusData.recommended_Fs if (self.sample_rate_input.get() == "")
+            else int(self.sample_rate_input.get())
+        )
         
-    
-    
+        mod = self.statusData.modulation_type.get()
+
+        if mod == "AM":
+            self.statusData.am_fc = (
+                self.statusData.recommended_am_fc if (self.carrier_freq_input.get() == "")
+                else float(self.carrier_freq_input.get())
+            )
+            self.statusData.am_Ac = (
+                self.statusData.recommended_am_Ac if (self.carrier_amp_input.get() == "")
+                else float(self.carrier_amp_input.get())
+            )
+            self.statusData.am_mu = (
+                self.statusData.recommended_am_mu if (self.modulation_index_input.get() == "")
+                else float(self.modulation_index_input.get())
+            )
+
+        elif mod == "FM":
+            self.statusData.fm_fc = (
+                self.statusData.recommended_fm_fc if (self.carrier_freq_input.get() == "")
+                else float(self.carrier_freq_input.get())
+            )
+            self.statusData.fm_Ac = (
+                self.statusData.recommended_fm_Ac if (self.carrier_amp_input.get() == "")
+                else float(self.carrier_amp_input.get())
+            )
+            self.statusData.fm_beta = (
+                self.statusData.recommended_fm_beta if (self.modulation_index_input.get() == "")
+                else float(self.modulation_index_input.get())
+            )
+        elif mod == "ASK":
+            self.statusData.ask_fc = (
+                self.statusData.recommended_ask_fc if (self.carrier_freq_input.get() == "")
+                else float(self.carrier_freq_input.get())
+            )
+            self.statusData.ask_Ac = (
+                self.statusData.recommended_ask_Ac if (self.carrier_amp_input.get() == "")
+                else float(self.carrier_amp_input.get())
+            )
+            self.statusData.ask_bitrate = (
+                self.statusData.recommended_ask_bitrate if (self.bitrate_input.get() == "")
+                else float(self.bitrate_input.get())
+            )
+
+        elif mod == "FSK":
+            self.statusData.fsk_fc1 = (
+                self.statusData.recommended_fsk_fc1 if (self.carrier_freq_input.get() == "")
+                else float(self.carrier_freq_input.get())
+            )
+            self.statusData.fsk_fc2 = (
+                self.statusData.recommended_fsk_fc2 if (self.carrier_freq_input.get() == "")
+                else float(self.carrier_freq_input.get())
+            )
+            self.statusData.fsk_Ac = (
+                self.statusData.recommended_fsk_Ac if (self.carrier_amp_input.get() == "")
+                else float(self.carrier_amp_input.get())
+            )
+            self.statusData.fsk_bitrate = (
+                self.statusData.recommended_fsk_bitrate if (self.bitrate_input.get() == "")
+                else float(self.bitrate_input.get())
+            )
+
     # Function to apply changes to the current simulation settings.
     def applyChanges(self):
 
@@ -424,6 +517,7 @@ class Dashboard(ctk.CTk):
 
             # Actualizar parámetros según entradas del usuario
             self.right_overview_panel()
+            
             
             # Si es estéreo, toma canal 0 (solo para leer SR y mostrar en UI)
             if len(data.shape) > 1:
@@ -441,12 +535,19 @@ class Dashboard(ctk.CTk):
                     pass
                 
             self.checkOptions()
+            #self.statusData.needs_reset = True
+            self._reset_ring_ui()
+            print("FRECUENCIA DE MUESTREO:" + str(self.statusData.sample_rate))
             
-            print("Valores para la simulacion elegidos")
-            print(self.statusData.sample_rate)
+            print("Valores para la simulacion elegidos AM")
             print(self.statusData.am_fc)
             print(self.statusData.am_Ac)
             print(self.statusData.am_mu)
+            
+            print("Valores para la simulacion elegidos FM")
+            print(self.statusData.fm_fc)
+            print(self.statusData.fm_Ac)
+            print(self.statusData.fm_beta)
             
             
             print("Changes applied successfully.")
@@ -454,6 +555,7 @@ class Dashboard(ctk.CTk):
             CTkMessagebox(title="Error", message="No audio file loaded or modulation type not selected.", icon="warning")
    
     def _reset_ring_ui(self):
+        
         N = int(self.statusData.window_seconds * float(self.statusData.sample_rate))
         N = max(1024, N)
 
@@ -481,20 +583,9 @@ class Dashboard(ctk.CTk):
         self.ax3.set_ylim(-1.1, 1.1)
         self.canvas3.draw_idle()
 
-        # Reiniciar estado AM para nueva Fs
-        self.statusData.am_initialized = False
-        self.statusData.am_phase = 0.0
-        self.statusData.am_xscale = None
-
-
 
     def _ui_timer(self):
         drained = False
-
-        # SR cambiado => reajustar y reiniciar estado AM
-        if getattr(self.statusData, "needs_reset", False):
-            self.statusData.needs_reset = False
-            self._reset_ring_ui()
 
         # Drenar cola de entrada (puede haber varios chunks por tick)
         while True:
@@ -502,21 +593,11 @@ class Dashboard(ctk.CTk):
                 chunk = self.statusData.q.get_nowait()
                 self.statusData.chunk_seq += 1
                 cid = self.statusData.chunk_seq
-                if self.statusData.ncc_pairer is not None:
-                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
+                             
             except queue.Empty:
                 break
 
             drained = True
-
-            # --- 1) Actualizar ring ORIGINAL ---
-            ring = self.statusData.ring
-            if len(chunk) >= len(ring):
-                ring[:] = chunk[-len(ring):]
-            else:
-                L = len(chunk)
-                ring[:-L] = ring[L:]
-                ring[-L:] = chunk
 
             # --- 2) MODULACIÓN AM (si está activa) ---
             s_mod = None
@@ -542,6 +623,20 @@ class Dashboard(ctk.CTk):
                     state=state_blk
                 )
                 self.statusData.am_phase = state_blk["phase"]
+
+                # Actualizar ring ORIGINAL con el PCM crudo (AM mantiene audio analógico)
+                ring = self.statusData.ring
+                if len(chunk) >= len(ring):
+                    ring[:] = chunk[-len(ring):]
+                else:
+                    L = len(chunk)
+                    ring[:-L] = ring[L:]
+                    ring[-L:] = chunk
+
+                # Empujar ORIGINAL al NCC (PCM crudo)
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
+
 
                 # Actualizar ring MODULADO
                 mring = self.statusData.mod_ring
@@ -589,15 +684,300 @@ class Dashboard(ctk.CTk):
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = s_demod
 
+            
+            # --- 2bis) MODULACIÓN FM (si está activa) ---
+            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FM":
+                # Prepare en el primer bloque
+                if not self.statusData.fm_initialized:
+                    st = fm_prepare_state(
+                        first_chunk=chunk.astype(np.float32),
+                        Fs=float(self.statusData.sample_rate),
+                        fc=float(self.statusData.fm_fc),
+                        Ac=float(self.statusData.fm_Ac),
+                        beta=float(self.statusData.fm_beta),
+                    )
+                    # Congelar en appstate
+                    self.statusData.fm_xscale = float(st["xscale"])
+                    self.statusData.fm_phase  = float(st["phase"])
+                    self.statusData.fm_kappa  = float(st["kappa"])
+                    self.statusData.fm_phase_unwrap_prev = float(st["phase_unwrap_prev"])
+                    self.statusData.fm_lp_ym1 = float(st["lp_ym1"])
+                    self.statusData.fm_initialized = True
+
+                # state bloque
+                state_blk = {
+                    "fc":    float(self.statusData.fm_fc),
+                    "Ac":    float(self.statusData.fm_Ac),
+                    "phase": float(self.statusData.fm_phase),
+                    "xscale":float(self.statusData.fm_xscale),
+                    "kappa": float(self.statusData.fm_kappa),
+                }
+
+                s_mod, state_blk = fm_modulate_block(
+                    x=chunk.astype(np.float32),
+                    Fs=float(self.statusData.sample_rate),
+                    state=state_blk
+                )
+                self.statusData.fm_phase = state_blk["phase"]
+
+                
+                  # Original PCM para FM
+                ring = self.statusData.ring
+                if len(chunk) >= len(ring):
+                    ring[:] = chunk[-len(ring):]
+                else:
+                    L = len(chunk)
+                    ring[:-L] = ring[L:]
+                    ring[-L:] = chunk
+
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
+
+                
+                # actualizar ring MODULADO
+                mring = self.statusData.mod_ring
+                if len(s_mod) >= len(mring):
+                    mring[:] = s_mod[-len(mring):]
+                else:
+                    Lm = len(s_mod)
+                    mring[:-Lm] = mring[Lm:]
+                    mring[-Lm:] = s_mod
+
+                # --- 3bis) DEMODULACIÓN FM ---
+                demod_state = {
+                    "fc": float(self.statusData.fm_fc),
+                    "kappa": float(self.statusData.fm_kappa),
+                    "fmax": float(self.statusData.fmax),
+                    "lp_ym1": float(self.statusData.fm_lp_ym1),
+                    "prev_z": self.statusData.fm_prev_z,   # <- nuevo
+                }
+                s_demod, demod_state = fm_demodulate_block(s=s_mod, Fs=float(self.statusData.sample_rate), state=demod_state)
+                self.statusData.fm_lp_ym1 = float(demod_state["lp_ym1"])
+                self.statusData.fm_prev_z = demod_state["prev_z"]          # <- nuevo
+
+
+                # Log NCC (igual que AM)
+                if self.statusData.ncc_pairer is not None:
+                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
+                    if res is not None:
+                        pct = res["percent"]
+                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
+                        color = "#00FF00" if pct >= thr else "#FF3B30"
+                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
+
+                # actualizar ring DEMOD
+                dring = self.statusData.demod_ring
+                if len(s_demod) >= len(dring):
+                    dring[:] = s_demod[-len(dring):]
+                else:
+                    Ld = len(s_demod)
+                    dring[:-Ld] = dring[Ld:]
+                    dring[-Ld:] = s_demod
+                    
+            # --- 2ter) MODULACIÓN ASK (si está activa) ---
+            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "ASK":
+                # 0) Asegura buffers (por si quedaron None/longitud 0)
+                if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
+                    self._reset_ring_ui()
+                if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
+                    self._reset_ring_ui()
+
+                # 1) Preparar estado (solo una vez)
+                if not self.statusData.ask_initialized:
+                    try:
+                        st = ask_prepare_state(
+                            first_chunk=chunk.astype(np.float32, copy=False),
+                            Fs=float(self.statusData.sample_rate),
+                            fc=float(self.statusData.ask_fc),
+                            Ac=float(self.statusData.ask_Ac),
+                            bitrate=float(self.statusData.ask_bitrate),
+                        )
+                    except Exception as e:
+                        self.log_result(f"[ASK] prepare_state error: {e}", color="#FF3B30")
+                        return
+                    self.statusData.ask_state = st
+                    self.statusData.ask_initialized = True
+
+                # 2) MODULAR: devuelve s_mod y bits por muestra para “original”
+                try:
+                    s_mod, bits_nrz = ask_modulate_block(
+                        x_chunk=chunk.astype(np.float32, copy=False),
+                        state=self.statusData.ask_state
+                    )
+                except Exception as e:
+                    self.log_result(f"[ASK] modulate error: {e}", color="#FF3B30")
+                    return
+
+                # Debug: revisa energía (si sale ~0, Ac/bitrate/umbral mal)
+                try:
+                    import numpy as _np
+                    rms_mod = float((_np.mean(s_mod.astype(_np.float64)**2) + 1e-18)**0.5)
+                    pk_mod = float(_np.max(_np.abs(s_mod))) if len(s_mod) else 0.0
+                    self.log_result(f"[ASK] mod rms={rms_mod:.3e}, pk={pk_mod:.3e}", color="#9AA0A6")
+                except Exception:
+                    pass
+
+                # 3) ORIGINAL: para ASK mostramos el NRZ (0/1). Si prefieres -1..1, usa (bits_nrz*2-1)
+                orig_display = bits_nrz
+                ring = self.statusData.ring
+                if len(orig_display) >= len(ring):
+                    ring[:] = orig_display[-len(ring):]
+                else:
+                    L = len(orig_display)
+                    ring[:-L] = ring[L:]
+                    ring[-L:] = orig_display
+
+                # NCC: original = NRZ, demod (más abajo) = y_env
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, orig_display.astype(np.float32, copy=False))
+
+                # 4) MOD_RING: copia s_mod
+                mring = self.statusData.mod_ring
+                if len(s_mod) >= len(mring):
+                    mring[:] = s_mod[-len(mring):]
+                else:
+                    Lm = len(s_mod)
+                    mring[:-Lm] = mring[Lm:]
+                    mring[-Lm:] = s_mod
+
+                # 5) DEMOD: envolvente + bits estimados
+                try:
+                    y_env, bits_hat = ask_demodulate_block(
+                        s_chunk=s_mod.astype(np.float32, copy=False),
+                        state=self.statusData.ask_state
+                    )
+                except Exception as e:
+                    self.log_result(f"[ASK] demod error: {e}", color="#FF3B30")
+                    return
+
+                # Debug demod
+                try:
+                    import numpy as _np
+                    rms_dem = float((_np.mean(y_env.astype(_np.float64)**2) + 1e-18)**0.5)
+                    pk_dem = float(_np.max(_np.abs(y_env))) if len(y_env) else 0.0
+                    self.log_result(f"[ASK] demod rms={rms_dem:.3e}, pk={pk_dem:.3e}", color="#9AA0A6")
+                except Exception:
+                    pass
+
+                # 6) DEMOD_RING: copia y_env (útil para visual)
+                dring = self.statusData.demod_ring
+                if len(y_env) >= len(dring):
+                    dring[:] = y_env[-len(dring):]
+                else:
+                    Ld = len(y_env)
+                    dring[:-Ld] = dring[Ld:]
+                    dring[-Ld:] = y_env
+
+                if hasattr(self.statusData, "digital_log"):  # opcional
+                    acc = digital_accuracy(bits_nrz, bits_hat)
+                    color = "#00FF00" if acc >= 70.0 else "#FF3B30"
+                    self.log_result(f"[ASK] Accuracy: {acc:.1f}%", color=color)
+
+            # --- 2quad) MODULACIÓN FSK (si está activa) ---
+            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FSK":
+                # Asegurar buffers
+                if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
+                    self._reset_ring_ui()
+                if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
+                    self._reset_ring_ui()
+
+                # Preparar estado (una sola vez)
+                if not self.statusData.fsk_initialized:
+                    try:
+                        st = bfsk_prepare_state(
+                            first_chunk=chunk.astype(np.float32, copy=False),
+                            Fs=float(self.statusData.sample_rate),
+                            f_low=float(self.statusData.fsk_fc2),    # bit 0
+                            f_high=float(self.statusData.fsk_fc1),   # bit 1
+                            Ac=float(self.statusData.fsk_Ac),
+                            bitrate=float(self.statusData.fsk_bitrate),
+                        )
+                    except Exception as e:
+                        self.log_result(f"[FSK] prepare_state error: {e}", color="#FF3B30")
+                        return
+                    self.statusData.fsk_state = st
+                    self.statusData.fsk_initialized = True
+
+                # MODULAR: devuelve s_mod y bits por muestra para “original” (NRZ 0/1)
+                try:
+                    s_mod, bits_nrz = bfsk_modulate_block(
+                        x_chunk=chunk.astype(np.float32, copy=False),
+                        state=self.statusData.fsk_state
+                    )
+                except Exception as e:
+                    self.log_result(f"[FSK] modulate error: {e}", color="#FF3B30")
+                    return
+
+                # ORIGINAL: para FSK mostramos el NRZ (0/1)
+                orig_display = bits_nrz
+                ring = self.statusData.ring
+                if len(orig_display) >= len(ring):
+                    ring[:] = orig_display[-len(ring):]
+                else:
+                    L = len(orig_display)
+                    ring[:-L] = ring[L:]
+                    ring[-L:] = orig_display
+
+                # NCC: original = NRZ, demod (más abajo) = y_soft
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, orig_display.astype(np.float32, copy=False))
+
+                # MOD_RING: copia s_mod
+                mring = self.statusData.mod_ring
+                if len(s_mod) >= len(mring):
+                    mring[:] = s_mod[-len(mring):]
+                else:
+                    Lm = len(s_mod)
+                    mring[:-Lm] = mring[Lm:]
+                    mring[-Lm:] = s_mod
+
+                # DEMOD: y_soft y bits estimados por muestra
+                try:
+                    y_soft, bits_hat = bfsk_demodulate_block(
+                        s_chunk=s_mod.astype(np.float32, copy=False),
+                        state=self.statusData.fsk_state
+                    )
+                except Exception as e:
+                    self.log_result(f"[FSK] demod error: {e}", color="#FF3B30")
+                    return
+
+                # Guardar ambas señales
+                self.statusData.fsk_state["last_y_soft"] = y_soft
+
+                # DEMOD_RING: mostrar reconstrucción digital
+                dring = self.statusData.demod_ring
+                if len(bits_hat) >= len(dring):
+                    dring[:] = bits_hat[-len(dring):]
+                else:
+                    Ld = len(bits_hat)
+                    dring[:-Ld] = dring[Ld:]
+                    dring[-Ld:] = bits_hat
+
+                # Métrica digital (si la usas)
+                if hasattr(self.statusData, "digital_log"):
+                    acc = digital_accuracy(bits_nrz, bits_hat)
+                    color = "#00FF00" if acc >= 70.0 else "#FF3B30"
+                    self.log_result(f"[FSK] Accuracy: {acc:.1f}%", color=color)
+
+                # NCC: como AM/FM/ASK
+                if self.statusData.ncc_pairer is not None:
+                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(y_soft, dtype=np.float32))
+                    if res is not None:
+                        pct = res["percent"]
+                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
+                        color = "#00FF00" if pct >= thr else "#FF3B30"
+                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
+
         # --- 4) Pintar si hubo datos ---
         if drained:
             self.line1.set_ydata(self.statusData.ring)
-            if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
+        if self.statusData.modulation_enabled:
+            mt = self.statusData.modulation_type.get()
+            if mt in ("AM", "FM", "ASK", "FSK"):
                 self.line2.set_ydata(self.statusData.mod_ring)
                 self.line3.set_ydata(self.statusData.demod_ring)
-            self.canvas1.draw_idle()
-            self.canvas2.draw_idle()
-            self.canvas3.draw_idle()
+        self.canvas1.draw_idle(); self.canvas2.draw_idle(); self.canvas3.draw_idle()
+
 
         # Reprogramar
         if self.statusData.is_running and not self.statusData.paused:
@@ -677,11 +1057,11 @@ class Dashboard(ctk.CTk):
         self.tb2 = self.add_toolbar_right(plots_frame, self.canvas2, row=1)
         
 
-
          # Demodulated Signal Plot
         self.canvas3 = FigureCanvasTkAgg(demodulated, master=plots_frame)
         self.canvas3.get_tk_widget().grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         self.ax3 = demodulated.axes[0] if demodulated.axes else demodulated.add_subplot(111)
+        
         x3 = np.arange(len(self.statusData.demod_ring))
         self.line3, = self.ax3.plot(x3, self.statusData.demod_ring, color='magenta', animated=False)
         self.ax3.set_xlim(0, len(self.statusData.demod_ring))
@@ -692,7 +1072,5 @@ class Dashboard(ctk.CTk):
         self.ax3.grid(axis='x', which='minor', linestyle='--', linewidth=0.5, alpha=0.35)
         self.ax3.grid(axis='x', which='major', linestyle='-', linewidth=0.6, alpha=0.5)
         self.ax3.set_axisbelow(True)
-      
-        
         self.tb3 = self.add_toolbar_right(plots_frame, self.canvas3, row=2)
 

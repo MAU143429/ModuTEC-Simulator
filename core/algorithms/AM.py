@@ -81,7 +81,7 @@ def am_demodulate_block(s: np.ndarray, Fs: float, state: dict, smooth_frac: floa
     return demod
 
 # ==========================
-# Utilidades
+# Utilities
 # ==========================
 def robust_peak(x):
     return float(np.percentile(np.abs(x), 99.9))

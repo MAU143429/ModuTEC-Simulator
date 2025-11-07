@@ -50,7 +50,8 @@ class AppState:
     recommended_ask_Ac: float = 0.0
     recommended_ask_bitrate: float = 0.0
     
-    recommended_fsk_fc: int = 0
+    recommended_fsk_fc1: int = 0
+    recommended_fsk_fc2: int = 0
     recommended_fsk_Ac: float = 0.0
     recommended_fsk_bitrate: float = 0.0
     
@@ -68,6 +69,34 @@ class AppState:
     am_phase: float = 0.0                                                                        # Accumulated phase (rad), for continuity
     am_xscale: float | None = None                                                               # Fixed signal scale (robust peak from first chunk)
     am_lp_ym1: float = 0.0
+    
+    
+    # --- FM streaming state ---
+    fm_initialized: bool = False
+    fm_fc: float | None = None
+    fm_beta: float = 2.0
+    fm_Ac: float | None = None
+    fm_phase: float = 0.0              # fase acumulada para continuidad
+    fm_xscale: float | None = None     # escala fija desde el 1er chunk
+    fm_kappa: float = 0.0              # 2π*Δf/Fs calculado en prepare
+    fm_phase_unwrap_prev: float = 0.0  # para continuidad en demod
+    fm_lp_ym1: float = 0.0             # estado LPF 1 polo en demod
+    fm_prev_z: complex | None = None
+    
+    # --- ASK (OOK) streaming state ---
+    ask_initialized: bool = False
+    ask_fc: float | None = None
+    ask_Ac: float | None = None
+    ask_bitrate: float = 2000.0
+    ask_state: dict | None = None  # estado interno del módulo ASK (persistente entre bloques)
+
+    # --- FSK (BFSK) streaming state ---
+    fsk_initialized: bool = False
+    fsk_fc1: float | None = None      # frecuencia para bit=1 (High)
+    fsk_fc2: float | None = None      # frecuencia para bit=0 (Low)
+    fsk_Ac:  float | None = None
+    fsk_bitrate: float = 2000.0
+    fsk_state: dict | None = None     # estado interno del módulo FSK (persistente entre bloques)
     
     
     # --- Métricas NCC ---
