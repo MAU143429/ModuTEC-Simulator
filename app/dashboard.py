@@ -21,8 +21,6 @@ from core.algorithms.FM import fm_prepare_state, fm_modulate_block, fm_demodulat
 from core.algorithms.ASK import ask_prepare_state, ask_modulate_block, ask_demodulate_block
 from core.algorithms.FSK import bfsk_prepare_state, bfsk_modulate_block, bfsk_demodulate_block
 
-
-
         
 class Dashboard(ctk.CTk):
     
@@ -133,77 +131,120 @@ class Dashboard(ctk.CTk):
 
     # Right Sidebar Overview Panel
     def right_overview_panel(self):
+        # Reset panel (idle)
         for widget in self.currentConfig.winfo_children():
             widget.destroy()
-        
+
+        # Fonts
         labelFont = ctk.CTkFont(family='FontAwesome', size=12)
         labelTitleFont = ctk.CTkFont(family='FontAwesome', size=12, weight="bold")
         titleFont = ctk.CTkFont(family='FontAwesome', size=18, weight="bold")
-    
-        ctk.CTkLabel(self.currentConfig, text="Simulation Overview", font=titleFont, text_color="white",
-                 anchor="center", justify="center").pack(pady=(5, 10), padx=10, anchor="center")
 
-        # Crear un frame para el grid de overview
+        # Título
+        ctk.CTkLabel(
+            self.currentConfig,
+            text="Simulation Overview",
+            font=titleFont,
+            text_color="white",
+            anchor="center",
+            justify="center"
+        ).pack(pady=(5, 10), padx=10, anchor="center")
+
+        # Contenedor del grid
         overview_grid = ctk.CTkFrame(self.currentConfig, fg_color=SIDEBAR_COLOR)
         overview_grid.pack(padx=10, pady=(0, 10), fill="x")
 
-        # Configurar 2 columnas y 4 filas
-        for i in range(4):
+        # Grid: 2 columnas x 5 filas
+        for i in range(5):
             overview_grid.grid_rowconfigure(i, weight=1)
         for j in range(2):
             overview_grid.grid_columnconfigure(j, weight=1)
-            
-        if self.statusData.audio_file_path == None and self.statusData.modulation_type.get() == "Select type":
-            filename = "No file loaded"
-            mod_type = "Not selected"
-        else:
-            filename = os.path.basename(self.statusData.audio_file_path)
-            mod_type = self.statusData.modulation_type.get()
-         
-         
-        ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white").grid(row=0, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white", wraplength=180, justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white").grid(row=1, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=f"Sample Rate: {self.statusData.sample_rate}", font=labelFont, text_color="white").grid(row=2, column=0, sticky="w", padx=5, pady=2)
 
-        # dinámicos por técnica
+        # Helpers
+        def _fmt(v):
+            try:
+                if isinstance(v, (int, np.integer)) or (isinstance(v, float) and float(v).is_integer()):
+                    return f"{int(v)}"
+                return f"{float(v):.4f}"
+            except Exception:
+                return str(v)
+
+        def _short(text, max_chars=28):
+            try:
+                t = os.path.basename(text) if text else "—"
+                if len(t) <= max_chars:
+                    return t
+                head = max_chars - 6
+                return f"{t[:head]}…{t[-5:]}"
+            except Exception:
+                return "—"
+
+        # Base info
+        filename = _short(getattr(self.statusData, "audio_file_path", None))
+        mod_type = self.statusData.modulation_type.get() if hasattr(self.statusData, "modulation_type") else "—"
+        if not mod_type or mod_type == "Select type":
+            mod_type = "—"
+
+        sr = getattr(self.statusData, "sample_rate", None)
+        if sr is None:
+            sr = getattr(self.statusData, "Fs", None)
+        sr_txt = f"Sample Rate: {int(sr)}" if sr is not None else "Sample Rate: —"
+
+        # Fila 0: encabezados
+        ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",
+                    anchor="w", justify="left").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white",
+                    anchor="w", justify="left").grid(row=0, column=1, sticky="w", padx=5, pady=2)
+
+        # Fila 1: valores
+        ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        # Fila 2: sample rate
+        ctk.CTkLabel(overview_grid, text=sr_txt, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+
+        # Filas 3–4: variables por técnica
+        row3_col0 = row3_col1 = row4_col0 = row4_col1 = "—"
+
         if mod_type == "AM":
-            bitrate_txt = f"Index μ: {self.statusData.am_mu}"
-            fc_txt = f"{self.statusData.am_fc}"
-            Ac_txt = f"{self.statusData.am_Ac}"
-        elif mod_type == "FM":
-            bitrate_txt = f"β: {self.statusData.fm_beta}"
-            fc_txt = f"{self.statusData.fm_fc}"
-            Ac_txt = f"{self.statusData.fm_Ac}"
-        elif mod_type == "ASK":
-            bitrate_txt = f"Bitrate: {self.statusData.ask_bitrate}"
-            fc_txt = f"{self.statusData.ask_fc}"
-            Ac_txt = f"{self.statusData.ask_Ac}"
-        elif mod_type == "FSK":
-            bitrate_txt = f"Bitrate: {self.statusData.fsk_bitrate}"
-            fc_txt = f"f1: {self.statusData.fsk_fc1} / f0: {self.statusData.fsk_fc2}"
-            Ac_txt = f"{self.statusData.fsk_Ac}"
-        else:
-            bitrate_txt = "—"
-            fc_txt = "—"
-            Ac_txt = "—"
+            row3_col0 = f"Index μ: {_fmt(getattr(self.statusData, 'am_mu', '—'))}"
+            row3_col1 = f"Carrier Frequency: {_fmt(getattr(self.statusData, 'am_fc', '—'))}"
+            row4_col0 = f"Carrier Amplitude: {_fmt(getattr(self.statusData, 'am_Ac', '—'))}"
+            row4_col1 = ""
 
-        ctk.CTkLabel(overview_grid, text=bitrate_txt, font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=f"Carrier Frequency: {fc_txt}", font=labelFont, text_color="white").grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=f"Carrier Amplitude: {Ac_txt}", font=labelFont, text_color="white").grid(row=3, column=1, sticky="w", padx=5, pady=2)         
-        ''' 
-        # Ejemplo de widgets en el grid
-        ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",anchor="center", justify="center").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white", anchor="center", justify="center").grid(row=0, column=1, sticky="w", padx=5, pady=2)
-        #ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid,text=filename,font=labelFont,text_color="white",wraplength=180,justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white").grid(row=1, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Sample Rate: " + str(self.statusData.sample_rate), font=labelFont, text_color="white").grid(row=2, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Bitrate: " + str(self.statusData.am_mu), font=labelFont, text_color="white").grid(row=2, column=1, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Carrier Frequency: " + str(self.statusData.am_fc), font=labelFont, text_color="white").grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkLabel(overview_grid, text="Carrier Amplitude: " + str(self.statusData.am_Ac), font=labelFont, text_color="white").grid(row=3, column=1, sticky="w", padx=5, pady=2)
-        '''  
+        elif mod_type == "FM":
+            row3_col0 = f"β: {_fmt(getattr(self.statusData, 'fm_beta', '—'))}"
+            row3_col1 = f"Carrier Frequency: {_fmt(getattr(self.statusData, 'fm_fc', '—'))}"
+            row4_col0 = f"Carrier Amplitude: {_fmt(getattr(self.statusData, 'fm_Ac', '—'))}"
+            row4_col1 = ""
+
+        elif mod_type == "ASK":
+            br = getattr(self.statusData, 'ask_bitrate', None)
+            row3_col0 = f"Bitrate: {int(br)} bps" if br is not None else "Bitrate: —"
+            row3_col1 = f"Carrier Frequency: {_fmt(getattr(self.statusData, 'ask_fc', '—'))}"
+            row4_col0 = f"Carrier Amplitude: {_fmt(getattr(self.statusData, 'ask_Ac', '—'))}"
+            row4_col1 = ""
+
+        elif mod_type == "FSK":
+            br = getattr(self.statusData, 'fsk_bitrate', None)
+            row3_col0 = f"Bitrate: {int(br)} bps" if br is not None else "Bitrate: —"
+            row3_col1 = f"Carrier Freq 1: {_fmt(getattr(self.statusData, 'fsk_fc1', '—'))}"
+            row4_col0 = f"Carrier Amplitude: {_fmt(getattr(self.statusData, 'fsk_Ac', '—'))}"
+            row4_col1 = f"Carrier Freq 2: {_fmt(getattr(self.statusData, 'fsk_fc2', '—'))}"
+
+        # Pintar
+        ctk.CTkLabel(overview_grid, text=row3_col0, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=row3_col1, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=3, column=1, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=row4_col0, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkLabel(overview_grid, text=row4_col1, font=labelFont, text_color="white",
+                    anchor="w", justify="left").grid(row=4, column=1, sticky="w", padx=5, pady=2)
+
     
     # Right Sidebar Results Panel
     def right_results_panel(self):
@@ -278,8 +319,6 @@ class Dashboard(ctk.CTk):
             self.songName.configure(
                 text=os.path.basename(self.statusData.audio_file_path) if self.statusData.audio_file_path else "Load a song..."
             )
-            
-        #TODO AGREGAR ACA QUE SE CALCULEN LOS VALORES PARA LA MODULACION
         
     
     # Function to handle the Start/Stop simulation button logic and UI updates.
@@ -515,10 +554,6 @@ class Dashboard(ctk.CTk):
             print("Modulation type:", self.statusData.modulation_type.get())
             sample_rate, data = wavfile.read(self.statusData.audio_file_path)
 
-            # Actualizar parámetros según entradas del usuario
-            self.right_overview_panel()
-            
-            
             # Si es estéreo, toma canal 0 (solo para leer SR y mostrar en UI)
             if len(data.shape) > 1:
                 data = data[:, 0]
@@ -535,19 +570,12 @@ class Dashboard(ctk.CTk):
                     pass
                 
             self.checkOptions()
-            #self.statusData.needs_reset = True
+
+
             self._reset_ring_ui()
-            print("FRECUENCIA DE MUESTREO:" + str(self.statusData.sample_rate))
-            
-            print("Valores para la simulacion elegidos AM")
-            print(self.statusData.am_fc)
-            print(self.statusData.am_Ac)
-            print(self.statusData.am_mu)
-            
-            print("Valores para la simulacion elegidos FM")
-            print(self.statusData.fm_fc)
-            print(self.statusData.fm_Ac)
-            print(self.statusData.fm_beta)
+        
+            # Actualizar parámetros según entradas del usuario
+            self.right_overview_panel()
             
             
             print("Changes applied successfully.")
