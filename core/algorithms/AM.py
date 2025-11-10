@@ -111,25 +111,21 @@ def am_demodulate_block(s: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarr
 
     # corte LPF: proporcional a fmax con leve margen/suelo
     #cut = min(0.15 * Fs, max(1.1 * fmax, fmax + 200.0))
-    cut = max(1.5 * fmax, fmax + 300.0)
-    cut = min(cut, 0.10 * Fs)      # no más del 10% de Fs
-    cut = max(cut, 40.0)           # evita cortes ridículamente bajos
+    # objetivo de corte (baseband + margen razonable)
+    cut_target = max(1.3 * fmax, fmax + 200.0)
+    cut_target = min(cut_target, 0.10 * Fs)   # techo 10% Fs
+    cut_target = max(cut_target, 40.0)        # piso 40 Hz
 
-    y_lp, y_last = one_pole_lpf_block(mixed, Fs, cut, y0)
-
-    y = (y_lp / (Ac + 1e-12) - 1.0) / (mu + 1e-12)
-    y = y.astype(np.float32, copy=False)  
-
-    ph1 = ph0 + omg * L
-    ph1 = float(np.fmod(ph1, _TWO_PI))
-
-    st = dict(state)
-    st["phase"]  = ph1
-    st["lp_ym1"] = float(y_last)
+    # FIR lineal-fase (retardo constante ya compensado en fir_lpf_block)
+    y_lp, st = fir_lpf_block(mixed, Fs, cut_target, dict(state), taps=129)
+    # si quieres guardar estado FIR en 'st' para bloques siguientes:
+    state.update({k: v for k, v in st.items() if k.startswith("fir_")})
     
+    y = (y_lp / (Ac + 1e-12) - 1.0) / (mu + 1e-12)
     blk_mean = float(state.get("blk_mean", 0.0))
     blk_peak = float(state.get("blk_peak", 1.0))
     y_rec = y * blk_peak + blk_mean
+
     return y_rec.astype(np.float32), st
 
 
@@ -173,26 +169,41 @@ def am_process_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray,
     return s_mod, s_dem, st_final, stats
 
 
+# ---------- FIR LPF lineal-fase con ventana Hamming ----------
+def _fir_lpf_design(fc_hz: float, Fs: float, taps: int = 129) -> np.ndarray:
+    fc = max(10.0, min(fc_hz, 0.12*Fs))
+    wc = 2.0*np.pi*fc/float(Fs)
+    M  = int(taps)
+    n  = np.arange(M, dtype=np.float64)
+    m  = n - (M-1)/2.0
+    h  = np.where(m == 0.0, wc/np.pi, np.sin(wc*m)/(np.pi*m))
+    w  = 0.54 - 0.46*np.cos(2.0*np.pi*n/(M-1))
+    h  = (h*w).astype(np.float32, copy=False)
+    h /= (np.sum(h) + 1e-12)   # DC = 1
+    return h
 
+def fir_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, state: dict,
+                  taps: int = 129) -> tuple[np.ndarray, dict]:
+    # reusa coeficientes si fc no cambió
+    h  = state.get("fir_h", None)
+    fch= state.get("fir_fc", None)
+    if (h is None) or (fch is None) or abs(fch - fc_hz) > 1e-3:
+        h = _fir_lpf_design(fc_hz, Fs, taps=taps)
+        state["fir_h"]  = h
+        state["fir_fc"] = float(fc_hz)
 
-# ==========================
-# Utilities ELIMINAR
-# ==========================
-def robust_peak(x):
-    return float(np.percentile(np.abs(x), 99.9))
+    # overlap con memoria simple
+    z = state.get("fir_zi", np.zeros(len(h)-1, dtype=np.float32))
+    y_full = np.convolve(x.astype(np.float32, copy=False), h, mode="full")
+    y_full[:len(z)] += z
+    z = y_full[-(len(h)-1):].copy()
+    y = y_full[:len(x)].astype(np.float32, copy=False)
+    state["fir_zi"] = z
 
-def estimate_fmax_fft(x, Fs):
-    N = min(len(x), 1 << 18)
-    X = np.fft.rfft(x[:N])
-    mag2 = np.abs(X)**2
-    freqs = np.fft.rfftfreq(N, d=1.0/Fs)
-    c = np.cumsum(mag2)
-    cp = c / (c[-1] if c[-1] > 0 else 1.0)
-    idx = np.searchsorted(cp, 0.99)
-    return float(freqs[min(idx, len(freqs)-1)])
-
-def moving_average(x, M):
-    if M <= 1:
-        return x.astype(np.float32, copy=True)
-    kernel = np.ones(M, dtype=np.float32) / float(M)
-    return np.convolve(x.astype(np.float32), kernel, mode='same')
+    # Compensación exacta del retardo constante D=(M-1)/2
+    D = (len(h)-1)//2
+    if D > 0:
+        y = np.roll(y, -D)
+        if D < len(y):
+            y[-D:] = y[-D-1]
+    return y, state
