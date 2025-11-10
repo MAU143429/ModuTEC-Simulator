@@ -147,13 +147,17 @@ def fm_demodulate_block(
     cut = state.get("lpf_cut", None)
     if cut is None:
         cut = min(0.05 * Fs, max(1.2 * fmax_blk_for_lpf, 2000.0))
-
+        '''
+        cut = max(1.1 * fmax_blk_for_lpf, fmax_blk_for_lpf + 200.0)
+        cut = min(cut, 0.10 * Fs)
+        cut = max(cut, 40.0)
+        '''
     m_lp, lp_ym1 = one_pole_lpf_block(m_est, Fs, float(cut), lp_ym1)
 
-    # --- 5) Recentrado DC y ganancia fija ---
-    m_lp = m_lp - np.mean(m_lp)        # elimina DC real sin escalar forma
-    #m_lp *= 10.0                       # ganancia fija para visualización (ajustable)
-
+    # --- 5) Visual + crossfade ---
+    m_lp -= np.mean(m_lp)
+    pk = np.max(np.abs(m_lp)) + 1e-12
+    m_lp = (m_lp / pk).astype(np.float32)
 
     if prev_tail is not None and XFADE > 0 and len(m_lp) > XFADE:
         w_in = np.linspace(0.0, 1.0, XFADE, dtype=np.float32)
