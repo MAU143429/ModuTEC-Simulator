@@ -2,15 +2,14 @@ import numpy as np
 
 _TWO_PI = 2.0 * np.pi
 
-# ---------------------------
-# Utilidades por-bloque (AM)
-# ---------------------------
 
+# =========================================================================================== #
+#                                     AM Block Utilities                                      #
+# =========================================================================================== #
+
+# Estimate baseband fmax of a block via spectral energy percentile
 def estimate_fmax_block(x: np.ndarray, Fs: float, nfft: int = 2048, energy_pct: float = 0.99) -> float:
-    """
-    Estima una fmax del contenido baseband del bloque usando un percentil
-    de energía del espectro. Ligero y estable para ventanas pequeñas.
-    """
+    
     if x is None or len(x) == 0 or Fs <= 0:
         return 1000.0
     L = len(x)
@@ -29,11 +28,9 @@ def estimate_fmax_block(x: np.ndarray, Fs: float, nfft: int = 2048, energy_pct: 
     idx = np.searchsorted(cum, energy_pct * tot)
     return float(freqs[min(idx, len(freqs) - 1)])
 
+# Compute per-block stats used by adaptive AM (mean, rms, peak, fmax)
 def compute_blk_stats(x: np.ndarray, Fs: float) -> dict:
-    """
-    Calcula estadísticas por bloque para AM adaptativa.
-    Devuelve: {'blk_mean','blk_rms','blk_peak','blk_fmax'}
-    """
+
     if x is None or x.size == 0:
         return {"blk_mean": 0.0, "blk_rms": 0.0, "blk_peak": 0.0, "blk_fmax": 1000.0}
     x64 = x.astype(np.float64, copy=False)
@@ -44,20 +41,13 @@ def compute_blk_stats(x: np.ndarray, Fs: float) -> dict:
     fmax = estimate_fmax_block(x.astype(np.float32, copy=False), Fs)
     return {"blk_mean": mean, "blk_rms": rms, "blk_peak": peak, "blk_fmax": fmax}
 
-# ---------------------------
-# Núcleo AM
-# ---------------------------
+# =========================================================================================== #
+#                                          AM Core                                            #
+# =========================================================================================== #
 
-def _safe_div(a: float, b: float, eps: float = 1e-12) -> float:
-    return float(a / (b if abs(b) > eps else eps))
-
+# AM Modulation Algorithm: The method modulates one block using adaptive scaling from block stats
 def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray, dict]:
-    """
-    AM coherente ADAPTATIVA por bloque:
-      s[n] = Ac * (1 + mu * x_norm[n]) * cos(2π fc n/Fs + φ0)
-    Donde x_norm se centra con blk_mean y escala con blk_peak del propio bloque.
-    Espera en state: fc, mu, Ac, phase, blk_mean, blk_peak
-    """
+    
     fc  = float(state["fc"])
     mu  = float(state["mu"])
     Ac  = float(state["Ac"])
@@ -86,14 +76,9 @@ def am_modulate_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray
     st["phase"] = ph1
     return s, st
 
+# AM Demodulation Algorithm: The method demodulates one block using adaptive LPF cutoff from block stats
 def am_demodulate_block(s: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray, dict]:
-    """
-    Demodulación coherente adaptativa:
-      - Mezcla con portadora local
-      - LPF 1-polo con fc definido por blk_fmax del bloque
-      - Ajuste físico con (Ac, mu) y recentrado en DC
-    Espera en state: fc, mu, Ac, phase, blk_fmax, lp_ym1
-    """
+
     fc   = float(state.get("fc", 1000.0))
     mu   = float(state.get("mu", 0.5))
     Ac   = float(state.get("Ac", 1.0))
@@ -109,18 +94,16 @@ def am_demodulate_block(s: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarr
     ref   = np.cos(ph, dtype=np.float32)
     mixed = ( 2.0 * s.astype(np.float32, copy=False) * ref).astype(np.float32, copy=False)
 
-    # corte LPF: proporcional a fmax con leve margen/suelo
-    #cut = min(0.15 * Fs, max(1.1 * fmax, fmax + 200.0))
-    # objetivo de corte (baseband + margen razonable)
+    # Set LPF cutoff from fmax with safety floor
     cut_target = max(1.3 * fmax, fmax + 200.0)
-    cut_target = min(cut_target, 0.10 * Fs)   # techo 10% Fs
-    cut_target = max(cut_target, 40.0)        # piso 40 Hz
+    cut_target = min(cut_target, 0.10 * Fs)   
+    cut_target = max(cut_target, 40.0)        
 
-    # FIR lineal-fase (retardo constante ya compensado en fir_lpf_block)
+    # FIR linear-phase LPF (stateful) and state passthrough
     y_lp, st = fir_lpf_block(mixed, Fs, cut_target, dict(state), taps=129)
-    # si quieres guardar estado FIR en 'st' para bloques siguientes:
     state.update({k: v for k, v in st.items() if k.startswith("fir_")})
     
+    # Recover baseband and restore original scale/mean
     y = (y_lp / (Ac + 1e-12) - 1.0) / (mu + 1e-12)
     blk_mean = float(state.get("blk_mean", 0.0))
     blk_peak = float(state.get("blk_peak", 1.0))
@@ -128,9 +111,9 @@ def am_demodulate_block(s: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarr
 
     return y_rec.astype(np.float32), st
 
-
+# One-pole LPF with persistent state across blocks
 def one_pole_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, y_prev: float) -> tuple[np.ndarray, float]:
-    """ LPF 1-polo con estado persistente entre bloques. """
+    
     fc    = max(1.0, float(fc_hz))
     alpha = 1.0 - np.exp(-2.0 * np.pi * fc / float(Fs))
     y     = np.empty_like(x, dtype=np.float32)
@@ -141,23 +124,17 @@ def one_pole_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, y_prev: float) ->
         y[i]   = y_last
     return y, y_last
 
-# --------------------------------------------
-# Conveniencia: paso AM completo por bloque
-# --------------------------------------------
+# =========================================================================================== #
+#                                    Full AM Block Process                                    #
+# =========================================================================================== #
+
+# Run a full AM cycle for one block: modulation + demodulation
 def am_process_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray, np.ndarray, dict, dict]:
-    """
-    Hace TODO el ciclo AM para un bloque:
-      - Calcula estadísticas por bloque
-      - Modula
-      - Demodula
-      - Devuelve s_mod, s_demod, state_actualizado, stats
-    Requiere en state: fc, mu, Ac, phase (y opcional lp_ym1)
-    """
+
     stats = compute_blk_stats(x, Fs)
     
     st_in = dict(state)
     
-
     st_in.update({
         "blk_mean": stats["blk_mean"],
         "blk_peak": stats["blk_peak"],
@@ -170,6 +147,8 @@ def am_process_block(x: np.ndarray, Fs: float, state: dict) -> tuple[np.ndarray,
 
 
 # ---------- FIR LPF lineal-fase con ventana Hamming ----------
+
+# Design a Hamming-windowed low-pass FIR with DC gain = 1
 def _fir_lpf_design(fc_hz: float, Fs: float, taps: int = 129) -> np.ndarray:
     fc = max(10.0, min(fc_hz, 0.12*Fs))
     wc = 2.0*np.pi*fc/float(Fs)
@@ -182,9 +161,11 @@ def _fir_lpf_design(fc_hz: float, Fs: float, taps: int = 129) -> np.ndarray:
     h /= (np.sum(h) + 1e-12)   # DC = 1
     return h
 
+# Apply stateful FIR LPF per block with exact group delay compensation
 def fir_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, state: dict,
                   taps: int = 129) -> tuple[np.ndarray, dict]:
-    # reusa coeficientes si fc no cambió
+    
+    
     h  = state.get("fir_h", None)
     fch= state.get("fir_fc", None)
     if (h is None) or (fch is None) or abs(fch - fc_hz) > 1e-3:
@@ -192,7 +173,7 @@ def fir_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, state: dict,
         state["fir_h"]  = h
         state["fir_fc"] = float(fc_hz)
 
-    # overlap con memoria simple
+    
     z = state.get("fir_zi", np.zeros(len(h)-1, dtype=np.float32))
     y_full = np.convolve(x.astype(np.float32, copy=False), h, mode="full")
     y_full[:len(z)] += z
@@ -200,7 +181,7 @@ def fir_lpf_block(x: np.ndarray, Fs: float, fc_hz: float, state: dict,
     y = y_full[:len(x)].astype(np.float32, copy=False)
     state["fir_zi"] = z
 
-    # Compensación exacta del retardo constante D=(M-1)/2
+
     D = (len(h)-1)//2
     if D > 0:
         y = np.roll(y, -D)

@@ -1,24 +1,11 @@
 import numpy as np
 import math
 
-# ============================================================
-# ASK (OOK) por bloques con digitalización adaptativa
-# ------------------------------------------------------------
-# MOD:
-#   - Por-bloque calcula un umbral tau_blk = percentil(|x|, p)
-#   - Promedia |x| por símbolo y decide 0/1 con histéresis + debounce
-#   - Genera s_mod = Ac * cos(2πfc t + phase) * NRZ
-#
-# DEMOD:
-#   - Envolvente LPF de |s|
-#   - Promedio por símbolo
-#   - Decisión con umbral adaptativo tau = 0.5*(mu0+mu1) y mu0/mu1 (EWMA)
-#
-# Notas:
-#   - No se normaliza el PCM globalmente; solo se analiza por bloque
-#   - Reloj de símbolo continuo (spb constante)
-# ============================================================
+# =========================================================================================== #
+#                                       ASK (OOK) Module                                      #
+# =========================================================================================== #
 
+# Initialize ASK state (rates, symbol timing, thresholds, filters, and accumulators)
 def ask_prepare_state(first_chunk: np.ndarray, Fs: float, fc: float, Ac: float, bitrate: float):
     st = {}
 
@@ -27,73 +14,46 @@ def ask_prepare_state(first_chunk: np.ndarray, Fs: float, fc: float, Ac: float, 
     st["ask_Ac"] = float(Ac)
     st["ask_bitrate"] = float(bitrate)
 
-    # --- reloj de símbolo ---
+    # --- Symbol clock (samples per bit) ---
     spb = int(round(Fs / float(bitrate)))
     st["spb"] = max(2, spb)
 
-    # --- parámetros de digitalización MOD ---
-    st["thr_percentile"] = 70.0   # percentil aplicado sobre |x| de CADA bloque
-    st["hyst_frac"]      = 0.10   # banda de histéresis como fracción de tau_blk
-    st["debounce_syms"]  = 1      # símbolos mínimos entre toggles
+    # --- MOD digitization parameters (per-block) ---
+    
+    st["thr_percentile"] = 70.0   
+    st["hyst_frac"]      = 0.10   
+    st["debounce_syms"]  = 1      
 
-    # acumuladores por símbolo (MOD)
-    st["mod_sym_sum"] = 0.0       # acum de |x|
+    # Accumulators (MOD)
+    st["mod_sym_sum"] = 0.0       
     st["mod_sym_cnt"] = 0
     st["mod_bit"]     = 0
     st["since_toggle_mod"] = 1e9
-    st["last_tau_blk"] = 0.0      # sólo para debug si lo quieres mostrar
+    st["last_tau_blk"] = 0.0      
 
-    # --- DEMOD: filtro de envolvente 1 polo ---
-    # fc_env ≈ 0.35*bitrate (cap a 5% de Fs)
+    # --- DEMOD: 1-pole envelope LPF ---
     fc_env = min(0.35 * bitrate, 0.05 * Fs)
     alpha = 1.0 - math.exp(-2.0 * math.pi * fc_env / Fs)
     st["env_alpha"] = float(alpha)
     st["env_lp"] = 0.0
 
-    # niveles adaptativos de la envolvente (EWMA)
+    # Adaptive envelope levels (EWMA)
     st["mu0"] = 0.10 * Ac
     st["mu1"] = 0.60 * Ac
     st["mu_rho"] = 0.10
 
-    # acumuladores por símbolo (DEMOD)
-    st["dem_sym_sum"] = 0.0    # acum de envolvente
+    # Accumulators (DEMOD)
+    st["dem_sym_sum"] = 0.0   
     st["dem_sym_cnt"] = 0
     st["dem_bit"]     = 0
 
-    # --- continuidad de portadora ---
+    # --- Carrier phase continuity ---
     st["phase"] = 0.0
     return st
 
-
-# ------------------------------------------------------------
-# Utilidad: envolvente LPF de |x|
-# ------------------------------------------------------------
-def _env_step_block(x: np.ndarray, env_lp: float, alpha: float):
-    env = np.empty_like(x, dtype=np.float32)
-    lp = float(env_lp)
-    a  = float(alpha)
-    xf = x.astype(np.float32, copy=False)
-    for i, v in enumerate(xf):
-        if v < 0: v = -v
-        lp = (1.0 - a) * lp + a * v
-        env[i] = lp
-    return env, lp
-
-
-# ------------------------------------------------------------
-# Digitalización MOD: decisión por símbolo usando |x|
-# ------------------------------------------------------------
+# Symbol-locked NRZ from |x| using per-block threshold with hysteresis + debounce
 def _nrz_from_abs_symbol_locked(x: np.ndarray, st: dict, tau_blk: float):
-    """
-    x: bloque PCM (float32). Se usa |x| para robustez frente a signo.
-    tau_blk: umbral del BLOQUE (percentil de |x|).
-    Regla por símbolo:
-      m_sym = mean(|x_sym|)
-      si m_sym >= tau_blk + band  -> bit=1
-      si m_sym <= tau_blk - band  -> bit=0
-      si dentro de banda muerta   -> mantener bit anterior
-    con histéresis (band = hyst_frac * tau_blk) y debounce en símbolos.
-    """
+
     x = x.astype(np.float32, copy=False)
     spb   = int(st["spb"])
     band  = float(st["hyst_frac"]) * float(tau_blk)
@@ -106,12 +66,14 @@ def _nrz_from_abs_symbol_locked(x: np.ndarray, st: dict, tau_blk: float):
     bits = np.empty_like(x, dtype=np.uint8)
 
     for i, v in enumerate(x):
+        # --- Accumulate absolute value within the current symbol ---
         av = v if v >= 0 else -v
         sym_sum += float(av)
         sym_cnt += 1
         bits[i] = bit
         since  += 1
 
+        # --- End of symbol: decide using hysteresis band ---
         if sym_cnt >= spb:
             m = sym_sum / float(sym_cnt)
             up   = tau_blk + band
@@ -121,7 +83,6 @@ def _nrz_from_abs_symbol_locked(x: np.ndarray, st: dict, tau_blk: float):
                 bit = 1; since = 0
             elif m <= down and since >= st["debounce_syms"]:
                 bit = 0; since = 0
-            # si m entra en (down, up) mantiene bit
 
             sym_sum = 0.0
             sym_cnt = 0
@@ -132,8 +93,11 @@ def _nrz_from_abs_symbol_locked(x: np.ndarray, st: dict, tau_blk: float):
     st["since_toggle_mod"] = int(since)
     return bits, st
 
+# =========================================================================================== #
+#                                        ASK Modulation                                       #
+# =========================================================================================== #
 
-# ========================= MOD ==============================
+# Modulate one block: compute block threshold, symbol NRZ, and carrier with phase continuity
 def ask_modulate_block(x_chunk: np.ndarray, state: dict):
     """
     1) Calcula tau_blk = percentil(|x|, thr_percentile)
@@ -144,17 +108,17 @@ def ask_modulate_block(x_chunk: np.ndarray, state: dict):
     fc = float(state["ask_fc"])
     Ac = float(state["ask_Ac"])
 
-    # --- 1) Umbral por bloque (robusto)
+    # --- Robust per-block threshold over |x| ---
     p = float(state.get("thr_percentile", 70.0))
     absx = np.abs(x_chunk.astype(np.float32, copy=False))
     tau_blk = float(np.percentile(absx, p))
     tau_blk = max(tau_blk, 1e-9)
     state["last_tau_blk"] = tau_blk  # (opcional debug en UI)
 
-    # --- 2) NRZ por símbolo (sobre |x|)
+    # --- NRZ per symbol over |x| with hysteresis + debounce ---
     bits_nrz, state = _nrz_from_abs_symbol_locked(x_chunk, state, tau_blk)
 
-    # --- 3) Portadora continua
+    # --- Continuous carrier and OOK shaping ---
     n = np.arange(len(bits_nrz), dtype=np.float32)
     wc = (2.0 * np.pi * fc) / Fs
     phase0 = float(state.get("phase", 0.0))
@@ -169,31 +133,27 @@ def ask_modulate_block(x_chunk: np.ndarray, state: dict):
     return s_mod, bits_nrz, state, stats
 
 
-# ======================== DEMOD =============================
+# =========================================================================================== #
+#                                        ASK Demodulation                                     #
+# =========================================================================================== #
+
+# Demodulate one block: envelope LPF, symbol integrate-and-dump, adaptive levels, Schmitt+debounce
 def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
-    """
-    Demod ASK robusta + salida ya en escala de visualización:
-    - LPF de |s| (envolvente)
-    - Integrate-and-dump por símbolo
-    - Niveles adaptativos mu0/mu1 (EWMA + leak)
-    - Histeresis dual (relativa y absoluta) + debounce
-    - y_plot: traza mapeada a [-Aplot, +Aplot] para que coincida con la "Señal Original"
-    """
     Fs      = float(state["Fs"])
     Ac      = float(state["ask_Ac"])
     spb     = int(state["spb"])
     alpha   = float(state["env_alpha"])
-    rho     = float(state.get("mu_rho", 0.10))        # velocidad EWMA
-    deb_sy  = int(state.get("debounce_syms", 1))      # debounce en símbolos
-    Aplot   = float(state.get("view_amp", 0.1))       # amplitud de plot deseada
+    rho     = float(state.get("mu_rho", 0.10))        
+    deb_sy  = int(state.get("debounce_syms", 1))      
+    Aplot   = float(state.get("view_amp", 0.1))      
 
-    # Knobs de conmutación (ajústalos si quieres más rapidez/estabilidad)
-    rel_band_k   = float(state.get("rel_band_k", 0.16))  # 0.12..0.20 (menor = más sensible)
-    abs_band_k   = float(state.get("abs_band_k", 0.03))  # 0.03..0.06  (mayor = menos chatter)
+    # Tuning knobs for switching behavior
+    rel_band_k   = float(state.get("rel_band_k", 0.16))  
+    abs_band_k   = float(state.get("abs_band_k", 0.03))  
     leak_per_blk = float(state.get("leak_per_blk", 0.03))
     gap_floor    = 0.04 * Ac
 
-    # 1) Envolvente LPF
+    # --- Envelope LPF over |s| ---
     env = np.empty_like(s_chunk, dtype=np.float32)
     lp  = float(state.get("env_lp", 0.0))
     a   = float(alpha)
@@ -204,19 +164,19 @@ def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
         env[i] = lp
     state["env_lp"] = float(lp)
 
-    # 2) Estadística de bloque para umbral absoluto
+    # --- Block stats for absolute thresholding ---
     p20  = float(np.percentile(env, 20))
     p80  = float(np.percentile(env, 80))
-    nf   = max(1e-9, p20)                        # ruido/piso
-    top  = max(p80, 0.5 * Ac, nf + gap_floor)    # alto robusto
+    nf   = max(1e-9, p20)                        
+    top  = max(p80, 0.5 * Ac, nf + gap_floor)   
 
-    # 3) Niveles adaptativos (con leak hacia stats frescas)
+    # --- Adaptive levels (EWMA with leak toward fresh stats) ---
     mu0  = float(state.get("mu0", 0.10 * Ac))
     mu1  = float(state.get("mu1", 0.60 * Ac))
     mu0  = (1.0 - leak_per_blk) * mu0 + leak_per_blk * nf
     mu1  = (1.0 - leak_per_blk) * mu1 + leak_per_blk * top
 
-    # 4) Integrate-and-dump por símbolo + Schmitt con debounce
+    # --- Symbol integrate-and-dump with Schmitt + debounce ---
     sym_sum = float(state.get("dem_sym_sum", 0.0))
     sym_cnt = int(state.get("dem_sym_cnt", 0))
     bit     = int(state.get("dem_bit", 0))
@@ -227,8 +187,8 @@ def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
     rel_band = rel_band_k * gap
     abs_band = abs_band_k * max(nf, 1e-9)
 
-    # Además generamos un "soft-NRZ" normalizado para la traza
-    # n_env = clip((env - mu0)/gap, 0..1)
+    # --- Soft-NRZ for plotting in the same scale as the original ---
+    
     n_env = (env - mu0) / (gap + 1e-12)
     n_env = np.clip(n_env, 0.0, 1.0)
 
@@ -239,17 +199,17 @@ def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
         since += 1
 
         if sym_cnt >= spb:
-            m   = sym_sum / float(sym_cnt)      # media por símbolo
+            m   = sym_sum / float(sym_cnt)      
             tau = 0.5 * (mu0 + mu1)
             band = max(rel_band, abs_band)
 
-            # Schmitt + debounce
+             # --- Schmitt trigger + debounce ---
             if bit == 0 and (m >= tau + band) and since >= deb_sy:
                 bit = 1; since = 0
             elif bit == 1 and (m <= tau - band) and since >= deb_sy:
                 bit = 0; since = 0
 
-            # EWMA acotado
+            # --- Bounded EWMA toward the active side ---
             if bit == 0:
                 target = min(m, tau)
                 mu0 = (1.0 - rho) * mu0 + rho * target
@@ -263,7 +223,7 @@ def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
             rel_band = rel_band_k * gap
             abs_band = abs_band_k * max(nf, 1e-9)
 
-    # Persistencia
+    # --- Persist updated states ---
     state["mu0"] = float(mu0)
     state["mu1"] = float(mu1)
     state["dem_sym_sum"] = float(sym_sum)
@@ -271,8 +231,7 @@ def ask_demodulate_block(s_chunk: np.ndarray, state: dict):
     state["dem_bit"] = int(bit)
     state["since_toggle"] = int(since)
 
-    # 5) Salida para el plot: MISMA ESCALA QUE LA ORIGINAL
-    # Mapear n_env ∈ [0,1] → [-Aplot, +Aplot] (Aplot≈0.1)
+    # --- Output trace mapped to the original plot scale ---
     y_plot = (n_env * (2.0 * Aplot) - Aplot).astype(np.float32)
 
     return y_plot, bits_hat
