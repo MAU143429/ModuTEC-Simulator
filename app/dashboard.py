@@ -18,18 +18,20 @@ from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from core.algorithms.AM import am_process_block 
 from core.algorithms.FM import fm_process_block
-from core.algorithms.ASK import ask_prepare_state, ask_modulate_block, ask_demodulate_block
-              
+from core.algorithms.ASK import ask_prepare_state, ask_modulate_block, ask_demodulate_block            
 from core.algorithms.FSK import bfsk_prepare_state, bfsk_modulate_block, bfsk_demodulate_block
 
-        
+# =========================================================================================== #
+#                                       Dashboard Class                                       #
+#   - Main CTk window managing UI panels, streaming, modulation flow, and logs.               #
+# =========================================================================================== #      
 class Dashboard(ctk.CTk):
     
+    # Constructor
     def __init__(self, statusData):
         super().__init__()
         
         # Application state variable
-        
         self.statusData = statusData
         
         self.SamplingStream = SamplingStream(statusData)
@@ -40,7 +42,6 @@ class Dashboard(ctk.CTk):
         
         
         # Initialize main panels
-        
         self.config_window()
         self.panels()
         self.navbar_panel()
@@ -161,7 +162,7 @@ class Dashboard(ctk.CTk):
         for j in range(2):
             overview_grid.grid_columnconfigure(j, weight=1)
 
-        # Helpers
+        # Helpers to format values
         def _fmt(v):
             try:
                 if isinstance(v, (int, np.integer)) or (isinstance(v, float) and float(v).is_integer()):
@@ -170,6 +171,7 @@ class Dashboard(ctk.CTk):
             except Exception:
                 return str(v)
 
+        # Helper to shorten file names
         def _short(text, max_chars=28):
             try:
                 t = os.path.basename(text) if text else "—"
@@ -180,7 +182,7 @@ class Dashboard(ctk.CTk):
             except Exception:
                 return "—"
 
-        # Base info
+        # Base information to display
         filename = _short(getattr(self.statusData, "audio_file_path", None))
         mod_type = self.statusData.modulation_type.get() if hasattr(self.statusData, "modulation_type") else "—"
         if not mod_type or mod_type == "Select type":
@@ -191,24 +193,25 @@ class Dashboard(ctk.CTk):
             sr = getattr(self.statusData, "Fs", None)
         sr_txt = f"Sample Rate: {int(sr)}" if sr is not None else "Sample Rate: —"
 
-        # Fila 0: encabezados
+        # Row 0: Headers
         ctk.CTkLabel(overview_grid, text="Audio File", font=labelTitleFont, text_color="white",
                     anchor="w", justify="left").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text="Modulation Type", font=labelTitleFont, text_color="white",
                     anchor="w", justify="left").grid(row=0, column=1, sticky="w", padx=5, pady=2)
 
-        # Fila 1: valores
+        # Row 1: filename and mod type
         ctk.CTkLabel(overview_grid, text=filename, font=labelFont, text_color="white",
                     anchor="w", justify="left").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text=mod_type, font=labelFont, text_color="white",
                     anchor="w", justify="left").grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
-        # Fila 2: sample rate
+        # Row 2: sample rate
         ctk.CTkLabel(overview_grid, text=sr_txt, font=labelFont, text_color="white",
                     anchor="w", justify="left").grid(row=2, column=0, sticky="w", padx=5, pady=2)
 
-        # Filas 3–4: variables por técnica
+        # Rows 3–4: variables by technique
         row3_col0 = row3_col1 = row4_col0 = row4_col1 = "—"
+
 
         if mod_type == "AM":
             row3_col0 = f"Index μ: {_fmt(getattr(self.statusData, 'am_mu', '—'))}"
@@ -236,7 +239,7 @@ class Dashboard(ctk.CTk):
             row4_col0 = f"Carrier Amplitude: {_fmt(getattr(self.statusData, 'fsk_Ac', '—'))}"
             row4_col1 = f"Carrier Freq 2: {_fmt(getattr(self.statusData, 'fsk_fc2', '—'))}"
 
-        # Pintar
+        # Rows 3 and 4: modulation-specific parameters
         ctk.CTkLabel(overview_grid, text=row3_col0, font=labelFont, text_color="white",
                     anchor="w", justify="left").grid(row=3, column=0, sticky="w", padx=5, pady=2)
         ctk.CTkLabel(overview_grid, text=row3_col1, font=labelFont, text_color="white",
@@ -257,8 +260,9 @@ class Dashboard(ctk.CTk):
         self.results_text = ctk.CTkTextbox(self.resultsArea, wrap="word", bg_color=SIDEBAR_COLOR, fg_color=SIDEBAR_COLOR,
                                            font=ctk.CTkFont(family='FontAwesome', size=12), border_width=0)
         self.results_text.pack(fill="both", expand=True, padx=10, pady=(0,10))
-        self.results_text.configure(state="disabled")   # inicia solo lectura
-
+        self.results_text.configure(state="disabled")   
+        
+    # Logs a message to the results panel with optional color coding.
     def log_result(self, msg: str, color: str = "white"):
         self.results_text.configure(state="normal")
         self.results_text.insert("end", msg + "\n")
@@ -266,6 +270,7 @@ class Dashboard(ctk.CTk):
         self.results_text.tag_config(color, foreground=color)
         self.results_text.see("end")
         self.results_text.configure(state="disabled")
+        
         
     # Creates and configures the left sidebar with options and controls.
     def left_sidebar_panel(self):
@@ -310,10 +315,8 @@ class Dashboard(ctk.CTk):
         else:
             self.statusData.audio_file_path = file_path
 
-        # Calculate the recommended params 
-        
+        # Calculate the recommended params for the loaded audio
         self.audioController.recommend_params()
-        
         
         # Update song name label
         if hasattr(self, "songName") and self.songName:
@@ -321,55 +324,54 @@ class Dashboard(ctk.CTk):
                 text=os.path.basename(self.statusData.audio_file_path) if self.statusData.audio_file_path else "Load a song..."
             )
         
-    
     # Function to handle the Start/Stop simulation button logic and UI updates.
     def simulation_button_animation(self):
         if not self.statusData.is_running:
-            # PLAY / RESUME
+            
+            # Play/Stop
             if not self.statusData.audio_file_path:
                 return
             self.startSimulation.configure(text="Stop", fg_color=STOP_COLOR)
 
-            # Reiniciar estado AM para nueva simulación
+            # Reset AM state for new simulation
             self.statusData.am_initialized = False
             self.statusData.am_phase = 0.0
-            
-            # Reiniciar estado FM para nueva simulación
+
+            # Reset FM state for new simulation
             self.statusData.fm_initialized = False
             self.statusData.fm_phase = 0.0
             self.statusData.fm_xscale = None
             self.statusData.fm_phase_unwrap_prev = 0.0
             self.statusData.fm_lp_ym1 = 0.0
-            
-            # Reiniciar estado ASK
+
+            # Reset ASK state
             self.statusData.ask_initialized = False
             self.statusData.ask_state = None
-            
-            # Reiniciar estado FSK
+
+            # Reset FSK state
             self.statusData.fsk_initialized = False
             self.statusData.fsk_state = None
 
-            
-            # En tu handler de "Start/Run" (donde reseteás estados AM)
+            # Start/Run handler of NCC Pairer
             if hasattr(self.statusData, "ncc_pairer"):
                 self.statusData.ncc_pairer = NCCPairer(maxlen=12)
             self.statusData.chunk_seq = 0
 
             self.statusData.is_running = True
 
-            # Iniciar el stream y el ploteo en tiempo real
+            # Start the stream and real-time plotting
             self.SamplingStream.start_stream()
             
-            # Arrancar consumidor (UI) si no está ya
+            # Start consumer (UI)
             if not self._ui_timer_running:
                 self._ui_timer_running = True
                 self.after(16, self._ui_timer)
         else:
-            # PAUSE
+            # Stop/Idle
             self.startSimulation.configure(text="Run", fg_color=RUNNING_COLOR)
             self.statusData.is_running = False
 
-            # Pausar el stream y el ploteo en tiempo real
+            # Pause the stream and real-time plotting
             self.SamplingStream.pause_stream()
 
 
@@ -379,6 +381,7 @@ class Dashboard(ctk.CTk):
             self.sidebar.pack_forget()
         else:
             self.sidebar.pack(side="left", fill="both")
+
 
     # Creates a embedded matplotlib plot.
     def create_embedded_plot(self, title):
@@ -397,12 +400,12 @@ class Dashboard(ctk.CTk):
 
     
     # Custom options in the left sidebar based on modulation type selection
-    
     def custom_options(self,value):
 
         for widget in self.optionsMenu.winfo_children():
             widget.destroy()
-            
+        
+        # Dynamic options based on modulation type
         if value == "AM":
             ctk.CTkLabel(self.optionsMenu, text="Sample Rate AM", text_color="white").pack(padx=10, anchor="w")
             self.sample_rate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_Fs)
@@ -477,17 +480,17 @@ class Dashboard(ctk.CTk):
             self.bitrate_input = ctk.CTkEntry(self.optionsMenu, placeholder_text=self.statusData.recommended_fsk_bitrate)
             self.bitrate_input.pack(padx=10, pady=(0, 15), fill="x")
         
+    # Function to check and set modulation options from user inputs or defaults.
     def checkOptions(self):
         
         # Setting the default recommended values
-        # Sample rate
         self.statusData.sample_rate = (
             self.statusData.recommended_Fs if (self.sample_rate_input.get() == "")
             else int(self.sample_rate_input.get())
         )
         
+        # Modulation-specific parameters
         mod = self.statusData.modulation_type.get()
-
         if mod == "AM":
             self.statusData.am_fc = (
                 self.statusData.recommended_am_fc if (self.carrier_freq_input.get() == "")
@@ -554,11 +557,11 @@ class Dashboard(ctk.CTk):
             print("Modulation type:", self.statusData.modulation_type.get())
             sample_rate, data = wavfile.read(self.statusData.audio_file_path)
 
-            # Si es estéreo, toma canal 0 (solo para leer SR y mostrar en UI)
+            # Mono channel if stereo
             if len(data.shape) > 1:
                 data = data[:, 0]
 
-           # --- [PATCH applyChanges - actualizar SR en UI de forma segura] ---
+            # Normalize audio data to float32 in range [-1, 1]
             sr_entry = getattr(self, "sample_rate_input", None)
             if sr_entry is not None:
                 try:
@@ -568,36 +571,39 @@ class Dashboard(ctk.CTk):
                 except Exception:
                     print("Failed to update sample rate in the UI.")
                     pass
-            # 0) Cortar cualquier lector activo y dejar flags/contadores en frío
+                
+            # 0) Stop any active reader and reset flags/counters
             try:
                 if hasattr(self, "SamplingStream") and self.SamplingStream:
                     self.SamplingStream.stop_stream()   # detiene hilo y lo pone en None internamente
             except Exception:
                 pass
 
-            # estado base
+            # Base state
             self.statusData.is_running = False
             self.statusData.paused = True
             self.statusData.pos_frames = 0
                 
+            # Create a new SamplingStream with updated parameters
             self.checkOptions()
 
+            # Reset the ring buffers and UI plots
             self._reset_ring_ui()
-        
-            # Actualizar parámetros según entradas del usuario
+
+            # Update parameters based on user inputs
             self.right_overview_panel()
-            
-            
             print("Changes applied successfully.")
         else :
             CTkMessagebox(title="Error", message="No audio file loaded or modulation type not selected.", icon="warning")
     
+    # Reset the ring buffers and update the UI plots accordingly.
     def _reset_ring_ui(self):
-
+        
+        # Calculate ring buffer size N
         N = int(self.statusData.window_seconds * float(self.statusData.sample_rate))
         N = max(1024, N)
         
-        # A) Purga no bloqueante de todos los items pendientes
+        # Clear any remaining items in the queue
         try:
             while True:
                 self.statusData.q.get_nowait()
@@ -606,7 +612,7 @@ class Dashboard(ctk.CTk):
         except Exception:
             pass
     
-        # Ring original
+        # Clear and reset the original ring buffer and plot
         self.statusData.ring = np.zeros(N, dtype=np.float32)
         x1 = np.arange(N)
         self.line1.set_data(x1, self.statusData.ring)
@@ -615,7 +621,7 @@ class Dashboard(ctk.CTk):
         self.ax1.autoscale_view(scalex=False, scaley=True)
         self.canvas1.draw_idle()
 
-        # Ring modulado
+        # Clear and reset the modulated ring buffer and plot
         self.statusData.mod_ring = np.zeros(N, dtype=np.float32)
         x2 = np.arange(N)
         self.line2.set_data(x2, self.statusData.mod_ring)
@@ -624,7 +630,7 @@ class Dashboard(ctk.CTk):
         self.ax2.autoscale_view(scalex=False, scaley=True)
         self.canvas2.draw_idle()
 
-        # Ring demodulado
+        # Clear and reset the demodulated ring buffer and plot
         self.statusData.demod_ring = np.zeros(N, dtype=np.float32)
         x3 = np.arange(N)
         self.line3.set_data(x3, self.statusData.demod_ring)
@@ -633,10 +639,11 @@ class Dashboard(ctk.CTk):
         self.ax3.autoscale_view(scalex=False, scaley=True)
         self.canvas3.draw_idle()
 
+    # UI Timer function to process incoming audio chunks and update plots.
     def _ui_timer(self):
         drained = False
-
-        # Drenar cola de entrada (puede haber varios chunks por tick)
+        
+        # Drain input queue (there may be multiple chunks per tick)
         while True:
             try:
                 chunk = self.statusData.q.get_nowait()
@@ -648,13 +655,15 @@ class Dashboard(ctk.CTk):
 
             drained = True
 
-            # --- 2) MODULACIÓN + DEMODULACIÓN AM (coherente, escala global) ---
+            # ============================================================================================================ 
+            # =                                  AM MODULATION AND DEMODULATION PROCESS                                  = 
+            # ============================================================================================================ 
             s_mod = None
             s_demod = None
 
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
 
-                # Asegura init una sola vez
+                # Check and initialize AM state
                 if not self.statusData.am_initialized:
                     self.statusData.am_phase = 0.0
                     self.statusData.am_lp_ym1 = 0.0
@@ -662,7 +671,7 @@ class Dashboard(ctk.CTk):
 
                 Fs = float(self.statusData.sample_rate)
 
-                # State mínimo requerido (usa tus valores actuales de UI/estado)
+                # Minimum state for AM Modulation/Demodulation
                 am_state = {
                     "fc":    float(self.statusData.am_fc),
                     "mu":    float(self.statusData.am_mu),
@@ -671,24 +680,24 @@ class Dashboard(ctk.CTk):
                     "lp_ym1": float(getattr(self.statusData, "am_lp_ym1", 0.0)),
                 }
 
-                # Ejecuta ciclo AM sobre el chunk actual (chunk debe ser np.float32 o convertible)
+                # Execute AM process block Modulation/Demodulation
                 s_mod, s_demod, am_state, blk_stats = am_process_block(
                     x=chunk.astype(np.float32, copy=False),
                     Fs=Fs,
                     state=am_state
                 )
 
-                # Actualiza estado persistente
+                # Update persistent state
                 self.statusData.am_phase  = am_state["phase"]
                 self.statusData.am_lp_ym1 = am_state.get("lp_ym1", 0.0)
 
-                # (Opcional) expón estadísticas por-bloque a tu UI/estado para debug
+                # Expose per-block stats to your UI/state
                 self.statusData.blk_mean = blk_stats["blk_mean"]
                 self.statusData.blk_rms  = blk_stats["blk_rms"]
                 self.statusData.blk_peak = blk_stats["blk_peak"]
                 self.statusData.blk_fmax = blk_stats["blk_fmax"]
 
-                # Actualiza RING ORIGINAL (PCM)
+                # Update the original ring buffer
                 ring = self.statusData.ring
                 if len(chunk) >= len(ring):
                     ring[:] = chunk[-len(ring):]
@@ -697,10 +706,11 @@ class Dashboard(ctk.CTk):
                     ring[:-L] = ring[L:]
                     ring[-L:] = chunk
 
+                # Push the original chunk to NCC
                 if self.statusData.ncc_pairer is not None:
                     self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
 
-                # Actualiza RING MODULADO
+                # Update the modulated ring buffer
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -709,7 +719,7 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
-                # Actualiza RING DEMODULADO
+                # Update the demodulated ring buffer
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):
                     dring[:] = s_demod[-len(dring):]
@@ -718,7 +728,7 @@ class Dashboard(ctk.CTk):
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = s_demod
 
-                # NCC (si lo usas)
+                # Pushed demodulated chunk to NCC
                 if self.statusData.ncc_pairer is not None:
                     res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
                     if res is not None and hasattr(self, "log_result"):
@@ -726,18 +736,22 @@ class Dashboard(ctk.CTk):
                         thr = getattr(self.statusData, "ncc_threshold", 70.0)
                         color = "#00FF00" if pct >= thr else "#FF3B30"
                         self.log_result(f"[AM] Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
-                # --- FIN AM ---
+
 
             
-           # --- 2bis) MODULACIÓN FM (si está activa) ---
+            # ============================================================================================================ 
+            # =                                  FM MODULATION AND DEMODULATION PROCESS                                  = 
+            # ============================================================================================================ 
+            
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FM":
 
+                # Check and initialize FM values
                 Fs   = float(self.statusData.sample_rate)
                 fc   = float(self.statusData.fm_fc)
                 Ac   = float(self.statusData.fm_Ac)
                 beta = float(self.statusData.fm_beta)
 
-                # Estado que pasa/recibe FM.py (solo intermediario)
+                # Check and initialize FM state
                 st_in = {
                     "phase":       float(self.statusData.fm_phase),
                     "prev_df":     float(self.statusData.fm_prev_df),
@@ -750,10 +764,11 @@ class Dashboard(ctk.CTk):
                     "hilbert_pad": int(self.statusData.fm_hilbert_pad),
                     "xfade":       int(self.statusData.fm_xfade),
                     "hpf_fc":      float(self.statusData.fm_hpf_fc),
-                    "lpf_cut":     self.statusData.fm_lpf_cut,      # puede ser None
+                    "lpf_cut":     self.statusData.fm_lpf_cut,      
                     "demod_gain":  float(self.statusData.fm_demod_gain),
                 }
 
+                # Execute FM process block Modulation/Demodulation
                 s_mod, s_demod, st_out, stats = fm_process_block(
                     x=chunk.astype(np.float32, copy=False),
                     Fs=Fs,
@@ -763,7 +778,7 @@ class Dashboard(ctk.CTk):
                     beta=beta
                 )
 
-                # Persistir estado devuelto
+                # Persist FM state
                 self.statusData.fm_phase     = float(st_out["phase"])
                 self.statusData.fm_prev_df   = float(st_out.get("prev_df", self.statusData.fm_prev_df))
                 self.statusData.fm_prev_z    = st_out["prev_z"]
@@ -773,12 +788,12 @@ class Dashboard(ctk.CTk):
                 self.statusData.fm_prev_tail = st_out["prev_tail"]
                 self.statusData.fm_prev_raw  = st_out["prev_raw"]
 
-                # Stats a panel
+                # Stats to panel
                 self.statusData.fm_fmax_blk  = float(stats["fmax_blk"])
                 self.statusData.fm_df_blk    = float(stats["df_blk"])
                 self.statusData.fm_kappa_blk = float(stats["kappa_blk"])
 
-                # Rings
+                # Update the original ring buffer
                 ring = self.statusData.ring
                 if len(chunk) >= len(ring):
                     ring[:] = chunk[-len(ring):]
@@ -786,7 +801,8 @@ class Dashboard(ctk.CTk):
                     L = len(chunk)
                     ring[:-L] = ring[L:]
                     ring[-L:] = chunk
-
+                    
+                # Update the modulated ring buffer
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -795,6 +811,7 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
+                # Update the demodulated ring buffer
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):
                     dring[:] = s_demod[-len(dring):]
@@ -803,7 +820,7 @@ class Dashboard(ctk.CTk):
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = s_demod
 
-                # NCC (si aplica)
+                # Push the original and demodulated chunk to NCC
                 if self.statusData.ncc_pairer is not None:
                     self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
                     res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
@@ -813,16 +830,15 @@ class Dashboard(ctk.CTk):
                         color = "#00FF00" if pct >= thr else "#FF3B30"
                         self.log_result(f"[FM] Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
                                 
-            # --- 2ter) MODULACIÓN ASK (bloque por bloque, versión actualizada) ---
+                                
+            # ============================================================================================================ 
+            # =                                  ASK MODULATION AND DEMODULATION PROCESS                                 = 
+            # ============================================================================================================
+            
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "ASK":
 
-                # --- buffers ---
-                if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
-                    self._reset_ring_ui()
-                if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
-                    self._reset_ring_ui()
 
-                # --- preparar estado una sola vez ---
+                # Check and initialize ASK values
                 if not self.statusData.ask_initialized:
                     try:
                         st = ask_prepare_state(
@@ -838,7 +854,7 @@ class Dashboard(ctk.CTk):
                         self.log_result(f"[ASK] Prepare State Error: {e}", color="#FF3B30")
                         return
 
-                # --- modular bloque ---
+                # Execute ASK Modulation Algorithm
                 try:
                     s_mod, bits_nrz, self.statusData.ask_state, stats = ask_modulate_block(
                         chunk.astype(np.float32, copy=False),
@@ -848,7 +864,7 @@ class Dashboard(ctk.CTk):
                     self.log_result(f"[ASK] Modulate Error: {e}", color="#FF3B30")
                     return
 
-                # --- demodular bloque ---
+                # Execute ASK Demodulation Algorithm
                 try:
                     y_env, bits_hat = ask_demodulate_block(
                         s_mod.astype(np.float32, copy=False),
@@ -858,7 +874,8 @@ class Dashboard(ctk.CTk):
                     self.log_result(f"[ASK] Demodulate Error: {e}", color="#FF3B30")
                     return
 
-                # --- rings ---
+
+                # Update the original ring buffer
                 ring = self.statusData.ring
                 orig_display = (bits_nrz.astype(np.float32) * 0.2) - 0.1
                 if len(orig_display) >= len(ring):
@@ -868,6 +885,7 @@ class Dashboard(ctk.CTk):
                     ring[:-L] = ring[L:]
                     ring[-L:] = orig_display
 
+                # Update the modulated ring buffer
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -876,6 +894,7 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
+                # Update the demodulated ring buffer
                 dring = self.statusData.demod_ring
                 if len(y_env) >= len(dring):
                     dring[:] = y_env[-len(dring):]
@@ -884,7 +903,8 @@ class Dashboard(ctk.CTk):
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = y_env
 
-                # --- métrica digital ---
+
+                # Push the original and demodulated chunk to NCC Digital Accuracy
                 try:
                     spb = int(stats.get("spb", max(2, int(round(self.statusData.sample_rate / self.statusData.ask_bitrate)))))
                     def to_symbols(bits):
@@ -904,15 +924,12 @@ class Dashboard(ctk.CTk):
                     self.log_result(f"[ASK] NCC Metric Error: {e}", color="#FF3B30")
 
 
-           # --- 2quad) MODULACIÓN FSK (BFSK por bloque, enfoque adaptativo) ---
+            # ============================================================================================================ 
+            # =                                  FSK MODULATION AND DEMODULATION PROCESS                                  = 
+            # ============================================================================================================ 
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FSK":
-                # Buffers UI
-                if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
-                    self._reset_ring_ui()
-                if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
-                    self._reset_ring_ui()
 
-                # Prepare state (una vez)
+                # Check and initialize FSK values
                 if not self.statusData.fsk_initialized:
                     try:
                         self.statusData.fsk_state = bfsk_prepare_state(
@@ -928,7 +945,7 @@ class Dashboard(ctk.CTk):
                         self.log_result(f"[FSK] prepare error: {e}", color="#FF3B30")
                         return
 
-                # MOD
+                # Execute FSK (BFSK) modulation process block 
                 try:
                     s_mod, bits_nrz, self.statusData.fsk_state, stats = bfsk_modulate_block(
                         chunk.astype(np.float32, copy=False),
@@ -938,11 +955,11 @@ class Dashboard(ctk.CTk):
                     self.log_result(f"[FSK] mod error: {e}", color="#FF3B30")
                     return
 
-                # Si no produjo símbolos completos aún, posponer UI/log para este ciclo
                 if s_mod.size == 0 or bits_nrz.size == 0:
                     return
+                
 
-                # ORIGINAL (NRZ a [-0.1,+0.1]) → ring “original”
+                # Update the original ring buffer
                 orig_display = (bits_nrz.astype(np.float32) * 0.2) - 0.1
                 ring = getattr(self.statusData, "ring", None)
                 if ring is not None and len(ring) > 0:
@@ -953,8 +970,8 @@ class Dashboard(ctk.CTk):
                         if L > 0:
                             ring[:-L] = ring[L:]
                             ring[-L:] = orig_display
-
-                # MOD_RING
+                            
+                # Update the modulated ring buffer
                 mring = self.statusData.mod_ring
                 if len(mring) > 0:
                     if len(s_mod) >= len(mring):
@@ -964,8 +981,8 @@ class Dashboard(ctk.CTk):
                         if Lm > 0:
                             mring[:-Lm] = mring[Lm:]
                             mring[-Lm:] = s_mod
-
-                # DEMOD
+                            
+                # Execute FSK (BFSK) demodulation process block 
                 try:
                     y_plot, bits_hat, self.statusData.fsk_state = bfsk_demodulate_block(
                         s_mod.astype(np.float32, copy=False),
@@ -975,11 +992,10 @@ class Dashboard(ctk.CTk):
                     self.log_result(f"[FSK] demod error: {e}", color="#FF3B30")
                     return
 
-                # Puede ocurrir que demod no emita (si quedó justo cortado el símbolo)
                 if y_plot.size == 0 or bits_hat.size == 0:
                     return
 
-                # DEMOD_RING (y_plot ya viene en [-0.1,+0.1])
+                # Update the demodulated ring buffer
                 dring = self.statusData.demod_ring
                 if len(dring) > 0:
                     if len(y_plot) >= len(dring):
@@ -990,7 +1006,8 @@ class Dashboard(ctk.CTk):
                             dring[:-Ld] = dring[Ld:]
                             dring[-Ld:] = y_plot
 
-                # LOG estilo NCC (texto), usando chunk_seq como cid
+
+                # Push the original and demodulated chunk to NCC Digital Accuracy
                 try:
                     cid = getattr(self.statusData, "chunk_seq", 0)
                     spb = int(stats.get("spb", max(2, int(round(self.statusData.sample_rate / max(1.0, self.statusData.fsk_bitrate))))))
@@ -1007,19 +1024,18 @@ class Dashboard(ctk.CTk):
                     sym_hat = to_symbols(bits_hat, spb)
 
                     if sym_src.size > 0 and sym_hat.size > 0 and (sym_src.size == sym_hat.size):
-                        acc = float(digital_accuracy(sym_src, sym_hat))  # tu función
+                        acc = float(digital_accuracy(sym_src, sym_hat))  
                         acc_pct = acc * 100.0 if acc <= 1.5 else acc
                         self.log_result(f"[FSK] Chunk #{cid} processed NCC: {acc_pct:.1f}%",
                                         color="#00FF00" if acc_pct >= 70.0 else "#FF3B30")
                     else:
-                        # Si aún no hay símbolos completos alineados, solo loguea el avance
                         tau_blk = stats.get("tau_blk", None)
                         if tau_blk is not None:
                             self.log_result(f"[FSK] Chunk #{cid} processed | spb={spb} | τ_blk≈{tau_blk:.4f}")
                         else:
                             self.log_result(f"[FSK] Chunk #{cid} processed")
 
-                    # incrementa el contador de chunks
+                    
                     setattr(self.statusData, "chunk_seq", cid + 1)
 
                 except Exception as e:
@@ -1027,7 +1043,7 @@ class Dashboard(ctk.CTk):
 
 
 
-        # --- 4) Pintar si hubo datos ---
+        # Draw updated data if any chunk was processed
         if drained:
             self.line1.set_ydata(self.statusData.ring)
 
@@ -1037,26 +1053,23 @@ class Dashboard(ctk.CTk):
                 self.line2.set_ydata(self.statusData.mod_ring)
                 self.line3.set_ydata(self.statusData.demod_ring)
 
-        # --- 🔧 Autoescala solo en Y (eje vertical fijo) ---
+        # Autoscale axes
         for ax in [self.ax1, self.ax2, self.ax3]:
             ax.relim()
             ax.autoscale_view(scalex=False, scaley=True)
 
-        # --- Redibujar ---
+        # Redraw
         self.canvas1.draw_idle()
         self.canvas2.draw_idle()
         self.canvas3.draw_idle()
 
-        # Reprogramar
+        # Reschedule timer if still running
         if self.statusData.is_running and not self.statusData.paused:
             self.after(16, self._ui_timer)
         else:
             self._ui_timer_running = False
 
-
-
-
-
+    # Adds a vertical toolbar to the right side of a given canvas within a parent grid.
     def add_toolbar_right(self, parent_grid, canvas, row:int, pady=(0,0)):
         
         holder = ctk.CTkFrame(parent_grid, fg_color=MAIN_BACKGROUND_COLOR, width=44)
@@ -1068,7 +1081,6 @@ class Dashboard(ctk.CTk):
         tb.update()
         tb.grid(row=0, column=0, sticky="ns", padx=0, pady=0)
         return tb
-
 
     # Displays the original, modulated, and demodulated signal plots in the main area.
     def display_signals(self):

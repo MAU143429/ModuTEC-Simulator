@@ -22,23 +22,19 @@ class AppState:
     paused: bool = True
     pos_frames: int = 0
     timer_active: bool = False
-    sd_stream: object = None   # TODO: INACTIVO
-    sd_device: object = None   # TODO: INACTIVO
     audio_channels: int = 1
     is_running: bool = False
-    needs_reset: bool = False  # TODO: NO ESTA SIRVIENDO
 
-    # --- Estadísticas del bloque actual (ADAPTATIVAS) ---
+    # --- Estadísticas del bloque actual ---
     blk_mean: float = 0.0
     blk_rms: float = 0.0
     blk_peak: float = 0.0
     blk_fmax: float = 1000.0  # Hz estimado del contenido baseband del chunk
 
     # --- Escala/normalización ---
-    # Usaremos modo "block": calcular estadísticas por chunk y no depender de valores globales.
-    normalize_mode: str = "block"  # "block" (nuevo) | "global" (obsoleto)
+    normalize_mode: str = "block"  
 
-    # --- Recommended modulation parameters (para placeholders/entradas UI) ---
+    # --- Recommended modulation parameters ---
     recommended_Fs: int = 0
     recommended_am_fc: int = 0
     recommended_am_Ac: float = 0.0
@@ -55,10 +51,12 @@ class AppState:
     recommended_fsk_bitrate: float = 0.0
 
     # --- Modulation / Demodulation parameters ---
+    
     modulation_enabled: bool = True
-    modulation_type: str | None = None  # "AM" | "FM" | "ASK" | "FSK" | None
+    modulation_type: str | None = None  
 
-    # --- AM streaming state (fase/LPF persistentes entre bloques) ---
+    # --- AM streaming state  ---
+    
     am_initialized: bool = False
     am_fc: float | None = None
     am_mu: float = 0.8
@@ -67,29 +65,23 @@ class AppState:
     am_lp_ym1: float = 0.0
 
     # --- FM streaming state ---
-   # --- Parámetros FM (UI o recomendados) ---
+    
     fm_fc: float = 12000.0
     fm_Ac: float = 0.9
     fm_beta: float = 2.0
-
-    # --- Estado FM (continuidad) ---
     fm_phase: float = 0.0
-    fm_prev_df: float = 0.0          # <-- para suavizado de df entre bloques
+    fm_prev_df: float = 0.0          
     fm_prev_z: object | None = None
     fm_lp_ym1: float = 0.0
     fm_hpf_xm1: float = 0.0
     fm_hpf_ym1: float = 0.0
     fm_prev_tail: object | None = None
     fm_prev_raw: object | None = None
-
-    # --- Perillas FM (por-bloque / demod) ---
-    fm_hilbert_pad: int = 4096       # overlap grande para estabilidad
-    fm_xfade: int = 512              # crossfade más largo
-    fm_hpf_fc: float = 2.0           # HPF baja frecuencia
-    fm_lpf_cut: float | None = None  # si None, FM.py calcula dinámico
-    fm_demod_gain: float = 1.0       # ganancia fija opcional (visual)
-
-    # --- Stats por bloque (para panel) ---
+    fm_hilbert_pad: int = 4096       
+    fm_xfade: int = 512              
+    fm_hpf_fc: float = 2.0           
+    fm_lpf_cut: float | None = None  
+    fm_demod_gain: float = 1.0       
     fm_fmax_blk: float = 0.0
     fm_df_blk: float = 0.0
     fm_kappa_blk: float = 0.0
@@ -101,7 +93,6 @@ class AppState:
     ask_bitrate: float = 2000.0
     ask_state: dict | None = None
 
-
     # --- FSK (BFSK) streaming state ---
     fsk_initialized: bool = False
     fsk_fc1: float | None = None
@@ -110,7 +101,7 @@ class AppState:
     fsk_bitrate: float = 2000.0
     fsk_state: dict | None = None
 
-    # --- Métricas NCC ---
+    # ---  NCC Metrics Algorithm ---
     ncc_pairer: object = None
     chunk_seq: int = 0
     ncc_threshold: float = 70.0

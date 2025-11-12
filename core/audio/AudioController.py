@@ -3,12 +3,12 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
-# -------------------------------
-# Helpers (fuera de la clase)
-# -------------------------------
+
+# Convert dBFS (decibels relative to full scale) to a linear amplitude ratio.
 def dbfs_to_linear(db: float) -> float:
     return float(10.0 ** (db / 20.0))
 
+# Compute the RMS (root mean square) of a signal array.
 def compute_rms(x):
     if x is None or x.size == 0:
         return 0.0
@@ -16,12 +16,22 @@ def compute_rms(x):
     x_dc = x64 - np.mean(x64)
     return float(np.sqrt(np.mean(x_dc * x_dc)))
 
+# =====================================================================#
+#                         AudioController Class                        #
+#                                                                      #
+#  - Load and analyze audio files (WAV, with MP3->WAV helper).         #
+#  - Persist global audio metadata and recommendations into app state. #
+#                                                                      #
+# =====================================================================#
 class AudioController:
+    
+    # Constructor
     def __init__(self, appstate):
         self.state = appstate
         self._sd_stream = None
         self._q = queue.Queue(maxsize=10)
 
+    # Convert MP3 to WAV using pydub
     def mp3ToWav(self, mp3_path):
         print("path mp3:", mp3_path)
         mp3_audio = AudioSegment.from_mp3(mp3_path)
@@ -29,11 +39,8 @@ class AudioController:
         mp3_audio.export(wav_path, format="wav")
         return wav_path
 
+    # Load WAV file and analyze its properties
     def load_wav_and_analyze(self, wav_path):
-        """
-        Carga WAV en memoria, NO normaliza la señal globalmente.
-        Sólo mide características globales informativas y cambia normalize_mode a "block".
-        """
         try:
             wf = wave.open(wav_path, "rb")
             Fs = wf.getframerate()
@@ -73,8 +80,8 @@ class AudioController:
         except Exception as e:
             print(f"[audio] error al cargar WAV: {e}")
     
+    # Recommend modulation parameters based on audio file analysis
     def recommend_params(self):
-        # General Information
         try:
             src_path = self.state.audio_file_path
             if not src_path or not src_path.lower().endswith(".wav"):
@@ -110,7 +117,7 @@ class AudioController:
         self.state.recommended_fsk_fc1 = self.state.recommended_fsk_fc2 + max(0.5 * self.state.recommended_fsk_bitrate, 1500.0)
         self.state.recommended_fsk_Ac = 0.9
 
-    
+    # Estimate maximum frequency component from WAV file
     def estimate_fmax_from_wav(self, chunks=6, chunk_frames=44100, target_fs=8000, nfft=4096, energy_pct=0.99):
         try:
             wf = wave.open(self.state.audio_file_path, "rb")
