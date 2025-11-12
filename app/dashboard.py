@@ -568,36 +568,19 @@ class Dashboard(ctk.CTk):
                 except Exception:
                     print("Failed to update sample rate in the UI.")
                     pass
+            # 0) Cortar cualquier lector activo y dejar flags/contadores en frío
+            try:
+                if hasattr(self, "SamplingStream") and self.SamplingStream:
+                    self.SamplingStream.stop_stream()   # detiene hilo y lo pone en None internamente
+            except Exception:
+                pass
+
+            # estado base
+            self.statusData.is_running = False
+            self.statusData.paused = True
+            self.statusData.pos_frames = 0
                 
             self.checkOptions()
-
-            # 2) Resetear el estado SOLO de la técnica elegida (para re-preparar en el próximo tick)
-            mod = self.statusData.modulation_type.get()
-            if mod == "AM":
-                self.statusData.am_initialized = False
-                self.statusData.am_phase = 0.0
-                self.statusData.am_lp_ym1 = 0.0
-
-            elif mod == "FM":
-                self.statusData.fm_initialized = False
-                self.statusData.fm_phase = 0.0
-                # limpiar estado previo de hilbert/demod
-                self.statusData.fm_prev_df = 0.0
-                self.statusData.fm_prev_z  = None
-                self.statusData.fm_lp_ym1  = 0.0
-                self.statusData.fm_hpf_xm1 = 0.0
-                self.statusData.fm_hpf_ym1 = 0.0
-                self.statusData.fm_prev_tail = None
-                self.statusData.fm_prev_raw  = None
-
-            elif mod == "ASK":
-                self.statusData.ask_initialized = False
-                self.statusData.ask_state = None
-
-            elif mod == "FSK":
-
-                self.statusData.fsk_initialized = False
-                self.statusData.fsk_state = None
 
             self._reset_ring_ui()
         
@@ -608,12 +591,21 @@ class Dashboard(ctk.CTk):
             print("Changes applied successfully.")
         else :
             CTkMessagebox(title="Error", message="No audio file loaded or modulation type not selected.", icon="warning")
-   
+    
     def _reset_ring_ui(self):
-        
+
         N = int(self.statusData.window_seconds * float(self.statusData.sample_rate))
         N = max(1024, N)
-
+        
+        # A) Purga no bloqueante de todos los items pendientes
+        try:
+            while True:
+                self.statusData.q.get_nowait()
+        except queue.Empty:
+            pass
+        except Exception:
+            pass
+    
         # Ring original
         self.statusData.ring = np.zeros(N, dtype=np.float32)
         x1 = np.arange(N)
@@ -640,7 +632,6 @@ class Dashboard(ctk.CTk):
         self.ax3.relim()
         self.ax3.autoscale_view(scalex=False, scaley=True)
         self.canvas3.draw_idle()
-
 
     def _ui_timer(self):
         drained = False
@@ -734,7 +725,7 @@ class Dashboard(ctk.CTk):
                         pct = res["percent"]
                         thr = getattr(self.statusData, "ncc_threshold", 70.0)
                         color = "#00FF00" if pct >= thr else "#FF3B30"
-                        self.log_result(f"[AM] Chunk #{res['chunk_id']} NCC: {pct:.1f}%", color=color)
+                        self.log_result(f"[AM] Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
                 # --- FIN AM ---
 
             

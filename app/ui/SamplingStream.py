@@ -22,6 +22,13 @@ class SamplingStream:
     def pause_stream(self):
         self.appstate.paused = True
 
+    def stop_stream(self):
+        self.appstate.stop_reader = True
+        if self.appstate.reader_thread and self.appstate.reader_thread.is_alive():
+            self.appstate.reader_thread.join(timeout=0.5)
+        self.appstate.reader_thread = None
+        self.appstate.paused = True
+        
     def reader_loop(self):
         try:
             with wave.open(self.appstate.audio_file_path, 'rb') as wf:

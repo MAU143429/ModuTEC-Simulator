@@ -94,8 +94,6 @@ class AppState:
     fm_df_blk: float = 0.0
     fm_kappa_blk: float = 0.0
 
-
-
     # --- ASK (OOK) streaming state ---
     ask_initialized: bool = False
     ask_fc: float | None = None

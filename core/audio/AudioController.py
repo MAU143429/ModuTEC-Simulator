@@ -100,72 +100,17 @@ class AudioController:
         self.state.recommended_fm_beta = 1.0
 
         # ASK
-        self.state.recommended_ask_bitrate = min(Fs/10, 4*fmax)
-        self.state.recommended_ask_fc = min(Fs/4, max(1000, 10*self.state.recommended_ask_bitrate))
-        self.state.recommended_ask_Ac = 0.90
-
-        # FSK
-        self.state.recommended_fsk_bitrate = min(Fs/10, 4*fmax)
-        self.state.recommended_fsk_fc2 = min(Fs/4, max(1000, 10*self.state.recommended_fsk_bitrate))
-        self.state.recommended_fsk_fc1 = self.state.recommended_fsk_fc2 * 5
-        self.state.recommended_fsk_Ac = 0.90
-    '''
+        self.state.recommended_ask_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
+        self.state.recommended_ask_fc = np.clip(8.0 * self.state.recommended_ask_bitrate, 2000.0, Fs / 5.0)
+        self.state.recommended_ask_Ac = 0.9
     
-    def recommend_params(self):
-        """
-        Calcula valores recomendados coherentes con el enfoque adaptativo por bloque.
-        Se basa en fmax del audio, asegurando separación espectral y spb >= 16.
-        """
-        try:
-            src_path = self.state.audio_file_path
-            if not src_path or not src_path.lower().endswith(".wav"):
-                raise ValueError("se esperaba un archivo .wav")
-            with wave.open(src_path, "rb") as wf:
-                Fs = wf.getframerate()
-        except Exception as e:
-            print(f"[audio] no se pudo extraer sample rate del WAV: {e}")
-            Fs = self.state.sample_rate or 44100
+        # FSK
+        self.state.recommended_fsk_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
+        self.state.recommended_fsk_fc2 = np.clip(6.0 * self.state.recommended_fsk_bitrate , 2000.0, Fs / 6.0)
+        self.state.recommended_fsk_fc1 = self.state.recommended_fsk_fc2 + max(0.5 * self.state.recommended_fsk_bitrate, 1500.0)
+        self.state.recommended_fsk_Ac = 0.9
 
-        fmax = self.estimate_fmax_from_wav()
-        self.state.fmax = fmax
-        self.state.recommended_Fs = Fs
-
-        # --- AM ---
-        am_fc = np.clip(6.0 * fmax, 1000.0, Fs / 6.0)
-        am_mu = 0.6
-        am_Ac = 0.9 / (1.0 + am_mu)
-        self.state.recommended_am_fc = am_fc
-        self.state.recommended_am_mu = am_mu
-        self.state.recommended_am_Ac = am_Ac
-
-        # --- FM ---
-        fm_fc = np.clip(6.0 * fmax, 1000.0, Fs / 6.0)
-        fm_beta = np.clip(fmax / 200.0, 0.5, 4.0)
-        fm_Ac = 0.9
-        self.state.recommended_fm_fc = fm_fc
-        self.state.recommended_fm_beta = fm_beta
-        self.state.recommended_fm_Ac = fm_Ac
-
-        # --- ASK ---
-        ask_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
-        ask_fc = np.clip(8.0 * ask_bitrate, 2000.0, Fs / 5.0)
-        ask_Ac = 0.9
-        self.state.recommended_ask_bitrate = ask_bitrate
-        self.state.recommended_ask_fc = ask_fc
-        self.state.recommended_ask_Ac = ask_Ac
-
-        # --- FSK (BFSK) ---
-        fsk_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
-        fsk_fc2 = np.clip(6.0 * fsk_bitrate, 2000.0, Fs / 6.0)   # LOW
-        fsk_fc1 = fsk_fc2 + max(0.5 * fsk_bitrate, 1500.0)       # HIGH
-        fsk_Ac = 0.9
-        self.state.recommended_fsk_bitrate = fsk_bitrate
-        self.state.recommended_fsk_fc1 = fsk_fc1
-        self.state.recommended_fsk_fc2 = fsk_fc2
-        self.state.recommended_fsk_Ac = fsk_Ac
-
-        print(f"[recommend] Fs={Fs}Hz fmax={fmax:.1f}Hz | AMfc={am_fc:.1f}Hz ASK_Rb={ask_bitrate:.1f}bps FSK Δf={fsk_fc1-fsk_fc2:.1f}Hz")
-    '''
+    
     def estimate_fmax_from_wav(self, chunks=6, chunk_frames=44100, target_fs=8000, nfft=4096, energy_pct=0.99):
         try:
             wf = wave.open(self.state.audio_file_path, "rb")
