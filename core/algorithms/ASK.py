@@ -99,11 +99,7 @@ def _nrz_from_abs_symbol_locked(x: np.ndarray, st: dict, tau_blk: float):
 
 # Modulate one block: compute block threshold, symbol NRZ, and carrier with phase continuity
 def ask_modulate_block(x_chunk: np.ndarray, state: dict):
-    """
-    1) Calcula tau_blk = percentil(|x|, thr_percentile)
-    2) Digitaliza por símbolo (|x|) con histéresis y debounce
-    3) s_mod = Ac * cos(2πfc t + phase) * NRZ
-    """
+
     Fs = float(state["Fs"])
     fc = float(state["ask_fc"])
     Ac = float(state["ask_Ac"])
