@@ -16,9 +16,10 @@ from core.statistics.metrics import digital_accuracy
 from core.audio.AudioController import AudioController
 from app.ui.VerticalRightToolbar import VerticalRightToolbar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from core.algorithms.AM import am_prepare_state, am_modulate_block, am_demodulate_block
-from core.algorithms.FM import fm_prepare_state, fm_modulate_block, fm_demodulate_block
+from core.algorithms.AM import am_process_block 
+from core.algorithms.FM import fm_process_block
 from core.algorithms.ASK import ask_prepare_state, ask_modulate_block, ask_demodulate_block
+              
 from core.algorithms.FSK import bfsk_prepare_state, bfsk_modulate_block, bfsk_demodulate_block
 
         
@@ -332,7 +333,6 @@ class Dashboard(ctk.CTk):
             # Reiniciar estado AM para nueva simulación
             self.statusData.am_initialized = False
             self.statusData.am_phase = 0.0
-            self.statusData.am_xscale = None
             
             # Reiniciar estado FM para nueva simulación
             self.statusData.fm_initialized = False
@@ -535,8 +535,8 @@ class Dashboard(ctk.CTk):
                 else float(self.carrier_freq_input.get())
             )
             self.statusData.fsk_fc2 = (
-                self.statusData.recommended_fsk_fc2 if (self.carrier_freq_input.get() == "")
-                else float(self.carrier_freq_input.get())
+                self.statusData.recommended_fsk_fc2 if (self.carrier_freq2_input.get() == "")
+                else float(self.carrier_freq2_input.get())
             )
             self.statusData.fsk_Ac = (
                 self.statusData.recommended_fsk_Ac if (self.carrier_amp_input.get() == "")
@@ -571,6 +571,33 @@ class Dashboard(ctk.CTk):
                 
             self.checkOptions()
 
+            # 2) Resetear el estado SOLO de la técnica elegida (para re-preparar en el próximo tick)
+            mod = self.statusData.modulation_type.get()
+            if mod == "AM":
+                self.statusData.am_initialized = False
+                self.statusData.am_phase = 0.0
+                self.statusData.am_lp_ym1 = 0.0
+
+            elif mod == "FM":
+                self.statusData.fm_initialized = False
+                self.statusData.fm_phase = 0.0
+                # limpiar estado previo de hilbert/demod
+                self.statusData.fm_prev_df = 0.0
+                self.statusData.fm_prev_z  = None
+                self.statusData.fm_lp_ym1  = 0.0
+                self.statusData.fm_hpf_xm1 = 0.0
+                self.statusData.fm_hpf_ym1 = 0.0
+                self.statusData.fm_prev_tail = None
+                self.statusData.fm_prev_raw  = None
+
+            elif mod == "ASK":
+                self.statusData.ask_initialized = False
+                self.statusData.ask_state = None
+
+            elif mod == "FSK":
+
+                self.statusData.fsk_initialized = False
+                self.statusData.fsk_state = None
 
             self._reset_ring_ui()
         
@@ -592,7 +619,8 @@ class Dashboard(ctk.CTk):
         x1 = np.arange(N)
         self.line1.set_data(x1, self.statusData.ring)
         self.ax1.set_xlim(0, N)
-        self.ax1.set_ylim(-1.1, 1.1)
+        self.ax1.relim()
+        self.ax1.autoscale_view(scalex=False, scaley=True)
         self.canvas1.draw_idle()
 
         # Ring modulado
@@ -600,7 +628,8 @@ class Dashboard(ctk.CTk):
         x2 = np.arange(N)
         self.line2.set_data(x2, self.statusData.mod_ring)
         self.ax2.set_xlim(0, N)
-        self.ax2.set_ylim(-1.1, 1.1)
+        self.ax2.relim()
+        self.ax2.autoscale_view(scalex=False, scaley=True)
         self.canvas2.draw_idle()
 
         # Ring demodulado
@@ -608,7 +637,8 @@ class Dashboard(ctk.CTk):
         x3 = np.arange(N)
         self.line3.set_data(x3, self.statusData.demod_ring)
         self.ax3.set_xlim(0, N)
-        self.ax3.set_ylim(-1.1, 1.1)
+        self.ax3.relim()
+        self.ax3.autoscale_view(scalex=False, scaley=True)
         self.canvas3.draw_idle()
 
 
@@ -627,32 +657,47 @@ class Dashboard(ctk.CTk):
 
             drained = True
 
-            # --- 2) MODULACIÓN AM (si está activa) ---
+            # --- 2) MODULACIÓN + DEMODULACIÓN AM (coherente, escala global) ---
             s_mod = None
+            s_demod = None
 
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "AM":
+
+                # Asegura init una sola vez
                 if not self.statusData.am_initialized:
-                    xscale = am_prepare_state(first_chunk=chunk.astype(np.float32))
-                    self.statusData.am_xscale = float(xscale)
                     self.statusData.am_phase = 0.0
+                    self.statusData.am_lp_ym1 = 0.0
                     self.statusData.am_initialized = True
 
-                state_blk = {
+                Fs = float(self.statusData.sample_rate)
+
+                # State mínimo requerido (usa tus valores actuales de UI/estado)
+                am_state = {
                     "fc":    float(self.statusData.am_fc),
                     "mu":    float(self.statusData.am_mu),
                     "Ac":    float(self.statusData.am_Ac),
                     "phase": float(self.statusData.am_phase),
-                    "xscale":float(self.statusData.am_xscale),
+                    "lp_ym1": float(getattr(self.statusData, "am_lp_ym1", 0.0)),
                 }
 
-                s_mod, state_blk = am_modulate_block(
-                    x=chunk.astype(np.float32),
-                    Fs=float(self.statusData.sample_rate),
-                    state=state_blk
+                # Ejecuta ciclo AM sobre el chunk actual (chunk debe ser np.float32 o convertible)
+                s_mod, s_demod, am_state, blk_stats = am_process_block(
+                    x=chunk.astype(np.float32, copy=False),
+                    Fs=Fs,
+                    state=am_state
                 )
-                self.statusData.am_phase = state_blk["phase"]
 
-                # Actualizar ring ORIGINAL con el PCM crudo (AM mantiene audio analógico)
+                # Actualiza estado persistente
+                self.statusData.am_phase  = am_state["phase"]
+                self.statusData.am_lp_ym1 = am_state.get("lp_ym1", 0.0)
+
+                # (Opcional) expón estadísticas por-bloque a tu UI/estado para debug
+                self.statusData.blk_mean = blk_stats["blk_mean"]
+                self.statusData.blk_rms  = blk_stats["blk_rms"]
+                self.statusData.blk_peak = blk_stats["blk_peak"]
+                self.statusData.blk_fmax = blk_stats["blk_fmax"]
+
+                # Actualiza RING ORIGINAL (PCM)
                 ring = self.statusData.ring
                 if len(chunk) >= len(ring):
                     ring[:] = chunk[-len(ring):]
@@ -661,12 +706,10 @@ class Dashboard(ctk.CTk):
                     ring[:-L] = ring[L:]
                     ring[-L:] = chunk
 
-                # Empujar ORIGINAL al NCC (PCM crudo)
                 if self.statusData.ncc_pairer is not None:
                     self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
 
-
-                # Actualizar ring MODULADO
+                # Actualiza RING MODULADO
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -675,35 +718,7 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
-            # --- 3) DEMODULACIÓN AM (si hay modulada y AM activa) ---
-            if s_mod is not None:
-                demod_state = {
-                    "fc": float(self.statusData.am_fc),
-                    "mu": float(self.statusData.am_mu),
-                    "Ac": float(self.statusData.am_Ac),
-                    "fmax": float(self.statusData.fmax),         
-                    "lp_ym1": float(getattr(self.statusData, "am_lp_ym1", 0.0)),  
-                }
-
-                s_demod = am_demodulate_block(
-                    s=s_mod,
-                    Fs=float(self.statusData.sample_rate),
-                    state=demod_state,          
-                )
-                
-                # Empujar DEMOD y registrar log con color según umbral
-                if self.statusData.ncc_pairer is not None:
-                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
-                    if res is not None:
-                        pct = res["percent"]
-                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
-                        color = "#00FF00" if pct >= thr else "#FF3B30"
-                        # Tu método de logging en el panel derecho:
-                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
-
-                
-                self.statusData.am_lp_ym1 = float(demod_state.get("lp_ym1", 0.0))
-
+                # Actualiza RING DEMODULADO
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):
                     dring[:] = s_demod[-len(dring):]
@@ -711,45 +726,68 @@ class Dashboard(ctk.CTk):
                     Ld = len(s_demod)
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = s_demod
+
+                # NCC (si lo usas)
+                if self.statusData.ncc_pairer is not None:
+                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
+                    if res is not None and hasattr(self, "log_result"):
+                        pct = res["percent"]
+                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
+                        color = "#00FF00" if pct >= thr else "#FF3B30"
+                        self.log_result(f"[AM] Chunk #{res['chunk_id']} NCC: {pct:.1f}%", color=color)
+                # --- FIN AM ---
 
             
-            # --- 2bis) MODULACIÓN FM (si está activa) ---
+           # --- 2bis) MODULACIÓN FM (si está activa) ---
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FM":
-                # Prepare en el primer bloque
-                if not self.statusData.fm_initialized:
-                    st = fm_prepare_state(
-                        first_chunk=chunk.astype(np.float32),
-                        Fs=float(self.statusData.sample_rate),
-                        fc=float(self.statusData.fm_fc),
-                        Ac=float(self.statusData.fm_Ac),
-                        beta=float(self.statusData.fm_beta),
-                    )
-                    # Congelar en appstate
-                    self.statusData.fm_xscale = float(st["xscale"])
-                    self.statusData.fm_phase  = float(st["phase"])
-                    self.statusData.fm_kappa  = float(st["kappa"])
-                    self.statusData.fm_phase_unwrap_prev = float(st["phase_unwrap_prev"])
-                    self.statusData.fm_lp_ym1 = float(st["lp_ym1"])
-                    self.statusData.fm_initialized = True
 
-                # state bloque
-                state_blk = {
-                    "fc":    float(self.statusData.fm_fc),
-                    "Ac":    float(self.statusData.fm_Ac),
-                    "phase": float(self.statusData.fm_phase),
-                    "xscale":float(self.statusData.fm_xscale),
-                    "kappa": float(self.statusData.fm_kappa),
+                Fs   = float(self.statusData.sample_rate)
+                fc   = float(self.statusData.fm_fc)
+                Ac   = float(self.statusData.fm_Ac)
+                beta = float(self.statusData.fm_beta)
+
+                # Estado que pasa/recibe FM.py (solo intermediario)
+                st_in = {
+                    "phase":       float(self.statusData.fm_phase),
+                    "prev_df":     float(self.statusData.fm_prev_df),
+                    "prev_z":      self.statusData.fm_prev_z,
+                    "lp_ym1":      float(self.statusData.fm_lp_ym1),
+                    "hpf_xm1":     float(self.statusData.fm_hpf_xm1),
+                    "hpf_ym1":     float(self.statusData.fm_hpf_ym1),
+                    "prev_tail":   self.statusData.fm_prev_tail,
+                    "prev_raw":    self.statusData.fm_prev_raw,
+                    "hilbert_pad": int(self.statusData.fm_hilbert_pad),
+                    "xfade":       int(self.statusData.fm_xfade),
+                    "hpf_fc":      float(self.statusData.fm_hpf_fc),
+                    "lpf_cut":     self.statusData.fm_lpf_cut,      # puede ser None
+                    "demod_gain":  float(self.statusData.fm_demod_gain),
                 }
 
-                s_mod, state_blk = fm_modulate_block(
-                    x=chunk.astype(np.float32),
-                    Fs=float(self.statusData.sample_rate),
-                    state=state_blk
+                s_mod, s_demod, st_out, stats = fm_process_block(
+                    x=chunk.astype(np.float32, copy=False),
+                    Fs=Fs,
+                    state=st_in,
+                    fc=fc,
+                    Ac=Ac,
+                    beta=beta
                 )
-                self.statusData.fm_phase = state_blk["phase"]
 
-                
-                  # Original PCM para FM
+                # Persistir estado devuelto
+                self.statusData.fm_phase     = float(st_out["phase"])
+                self.statusData.fm_prev_df   = float(st_out.get("prev_df", self.statusData.fm_prev_df))
+                self.statusData.fm_prev_z    = st_out["prev_z"]
+                self.statusData.fm_lp_ym1    = float(st_out["lp_ym1"])
+                self.statusData.fm_hpf_xm1   = float(st_out["hpf_xm1"])
+                self.statusData.fm_hpf_ym1   = float(st_out["hpf_ym1"])
+                self.statusData.fm_prev_tail = st_out["prev_tail"]
+                self.statusData.fm_prev_raw  = st_out["prev_raw"]
+
+                # Stats a panel
+                self.statusData.fm_fmax_blk  = float(stats["fmax_blk"])
+                self.statusData.fm_df_blk    = float(stats["df_blk"])
+                self.statusData.fm_kappa_blk = float(stats["kappa_blk"])
+
+                # Rings
                 ring = self.statusData.ring
                 if len(chunk) >= len(ring):
                     ring[:] = chunk[-len(ring):]
@@ -758,11 +796,6 @@ class Dashboard(ctk.CTk):
                     ring[:-L] = ring[L:]
                     ring[-L:] = chunk
 
-                if self.statusData.ncc_pairer is not None:
-                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
-
-                
-                # actualizar ring MODULADO
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -771,29 +804,6 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
-                # --- 3bis) DEMODULACIÓN FM ---
-                demod_state = {
-                    "fc": float(self.statusData.fm_fc),
-                    "kappa": float(self.statusData.fm_kappa),
-                    "fmax": float(self.statusData.fmax),
-                    "lp_ym1": float(self.statusData.fm_lp_ym1),
-                    "prev_z": self.statusData.fm_prev_z,   # <- nuevo
-                }
-                s_demod, demod_state = fm_demodulate_block(s=s_mod, Fs=float(self.statusData.sample_rate), state=demod_state)
-                self.statusData.fm_lp_ym1 = float(demod_state["lp_ym1"])
-                self.statusData.fm_prev_z = demod_state["prev_z"]          # <- nuevo
-
-
-                # Log NCC (igual que AM)
-                if self.statusData.ncc_pairer is not None:
-                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
-                    if res is not None:
-                        pct = res["percent"]
-                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
-                        color = "#00FF00" if pct >= thr else "#FF3B30"
-                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
-
-                # actualizar ring DEMOD
                 dring = self.statusData.demod_ring
                 if len(s_demod) >= len(dring):
                     dring[:] = s_demod[-len(dring):]
@@ -801,16 +811,27 @@ class Dashboard(ctk.CTk):
                     Ld = len(s_demod)
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = s_demod
-                    
-            # --- 2ter) MODULACIÓN ASK (si está activa) ---
+
+                # NCC (si aplica)
+                if self.statusData.ncc_pairer is not None:
+                    self.statusData.ncc_pairer.push_original(cid, np.asarray(chunk, dtype=np.float32))
+                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(s_demod, dtype=np.float32))
+                    if res is not None:
+                        pct = res["percent"]
+                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
+                        color = "#00FF00" if pct >= thr else "#FF3B30"
+                        self.log_result(f"[FM] Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
+                                
+            # --- 2ter) MODULACIÓN ASK (bloque por bloque, versión actualizada) ---
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "ASK":
-                # 0) Asegura buffers (por si quedaron None/longitud 0)
+
+                # --- buffers ---
                 if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
                     self._reset_ring_ui()
                 if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
                     self._reset_ring_ui()
 
-                # 1) Preparar estado (solo una vez)
+                # --- preparar estado una sola vez ---
                 if not self.statusData.ask_initialized:
                     try:
                         st = ask_prepare_state(
@@ -820,34 +841,35 @@ class Dashboard(ctk.CTk):
                             Ac=float(self.statusData.ask_Ac),
                             bitrate=float(self.statusData.ask_bitrate),
                         )
+                        self.statusData.ask_state = st
+                        self.statusData.ask_initialized = True
                     except Exception as e:
-                        self.log_result(f"[ASK] prepare_state error: {e}", color="#FF3B30")
+                        self.log_result(f"[ASK] Prepare State Error: {e}", color="#FF3B30")
                         return
-                    self.statusData.ask_state = st
-                    self.statusData.ask_initialized = True
 
-                # 2) MODULAR: devuelve s_mod y bits por muestra para “original”
+                # --- modular bloque ---
                 try:
-                    s_mod, bits_nrz = ask_modulate_block(
-                        x_chunk=chunk.astype(np.float32, copy=False),
-                        state=self.statusData.ask_state
+                    s_mod, bits_nrz, self.statusData.ask_state, stats = ask_modulate_block(
+                        chunk.astype(np.float32, copy=False),
+                        self.statusData.ask_state
                     )
                 except Exception as e:
-                    self.log_result(f"[ASK] modulate error: {e}", color="#FF3B30")
+                    self.log_result(f"[ASK] Modulate Error: {e}", color="#FF3B30")
                     return
 
-                # Debug: revisa energía (si sale ~0, Ac/bitrate/umbral mal)
+                # --- demodular bloque ---
                 try:
-                    import numpy as _np
-                    rms_mod = float((_np.mean(s_mod.astype(_np.float64)**2) + 1e-18)**0.5)
-                    pk_mod = float(_np.max(_np.abs(s_mod))) if len(s_mod) else 0.0
-                    self.log_result(f"[ASK] mod rms={rms_mod:.3e}, pk={pk_mod:.3e}", color="#9AA0A6")
-                except Exception:
-                    pass
+                    y_env, bits_hat = ask_demodulate_block(
+                        s_mod.astype(np.float32, copy=False),
+                        self.statusData.ask_state
+                    )
+                except Exception as e:
+                    self.log_result(f"[ASK] Demodulate Error: {e}", color="#FF3B30")
+                    return
 
-                # 3) ORIGINAL: para ASK mostramos el NRZ (0/1). Si prefieres -1..1, usa (bits_nrz*2-1)
-                orig_display = bits_nrz
+                # --- rings ---
                 ring = self.statusData.ring
+                orig_display = (bits_nrz.astype(np.float32) * 0.2) - 0.1
                 if len(orig_display) >= len(ring):
                     ring[:] = orig_display[-len(ring):]
                 else:
@@ -855,11 +877,6 @@ class Dashboard(ctk.CTk):
                     ring[:-L] = ring[L:]
                     ring[-L:] = orig_display
 
-                # NCC: original = NRZ, demod (más abajo) = y_env
-                if self.statusData.ncc_pairer is not None:
-                    self.statusData.ncc_pairer.push_original(cid, orig_display.astype(np.float32, copy=False))
-
-                # 4) MOD_RING: copia s_mod
                 mring = self.statusData.mod_ring
                 if len(s_mod) >= len(mring):
                     mring[:] = s_mod[-len(mring):]
@@ -868,26 +885,6 @@ class Dashboard(ctk.CTk):
                     mring[:-Lm] = mring[Lm:]
                     mring[-Lm:] = s_mod
 
-                # 5) DEMOD: envolvente + bits estimados
-                try:
-                    y_env, bits_hat = ask_demodulate_block(
-                        s_chunk=s_mod.astype(np.float32, copy=False),
-                        state=self.statusData.ask_state
-                    )
-                except Exception as e:
-                    self.log_result(f"[ASK] demod error: {e}", color="#FF3B30")
-                    return
-
-                # Debug demod
-                try:
-                    import numpy as _np
-                    rms_dem = float((_np.mean(y_env.astype(_np.float64)**2) + 1e-18)**0.5)
-                    pk_dem = float(_np.max(_np.abs(y_env))) if len(y_env) else 0.0
-                    self.log_result(f"[ASK] demod rms={rms_dem:.3e}, pk={pk_dem:.3e}", color="#9AA0A6")
-                except Exception:
-                    pass
-
-                # 6) DEMOD_RING: copia y_env (útil para visual)
                 dring = self.statusData.demod_ring
                 if len(y_env) >= len(dring):
                     dring[:] = y_env[-len(dring):]
@@ -896,116 +893,168 @@ class Dashboard(ctk.CTk):
                     dring[:-Ld] = dring[Ld:]
                     dring[-Ld:] = y_env
 
-                if hasattr(self.statusData, "digital_log"):  # opcional
-                    acc = digital_accuracy(bits_nrz, bits_hat)
-                    color = "#00FF00" if acc >= 70.0 else "#FF3B30"
-                    self.log_result(f"[ASK] Accuracy: {acc:.1f}%", color=color)
+                # --- métrica digital ---
+                try:
+                    spb = int(stats.get("spb", max(2, int(round(self.statusData.sample_rate / self.statusData.ask_bitrate)))))
+                    def to_symbols(bits):
+                        L = len(bits)
+                        q = L // spb
+                        if q <= 0:
+                            return np.array([], dtype=np.uint8)
+                        b = bits[:q * spb].reshape(q, spb)
+                        return (np.mean(b, axis=1) >= 0.5).astype(np.uint8)
+                    sym_src = to_symbols(bits_nrz)
+                    sym_hat = to_symbols(bits_hat)
+                    acc = float(digital_accuracy(sym_src, sym_hat))
+                    acc_pct = acc*100.0 if acc <= 1.5 else acc   
+                    self.log_result(f"[ASK] Chunk #{cid} processed NCC: {acc_pct:.1f}%", color="#00FF00" if acc_pct >= 70.0 else "#FF3B30")
 
-            # --- 2quad) MODULACIÓN FSK (si está activa) ---
+                except Exception as e:
+                    self.log_result(f"[ASK] NCC Metric Error: {e}", color="#FF3B30")
+
+
+           # --- 2quad) MODULACIÓN FSK (BFSK por bloque, enfoque adaptativo) ---
             if self.statusData.modulation_enabled and self.statusData.modulation_type.get() == "FSK":
-                # Asegurar buffers
+                # Buffers UI
                 if (getattr(self.statusData, "mod_ring", None) is None) or (len(self.statusData.mod_ring) == 0):
                     self._reset_ring_ui()
                 if (getattr(self.statusData, "demod_ring", None) is None) or (len(self.statusData.demod_ring) == 0):
                     self._reset_ring_ui()
 
-                # Preparar estado (una sola vez)
+                # Prepare state (una vez)
                 if not self.statusData.fsk_initialized:
                     try:
-                        st = bfsk_prepare_state(
+                        self.statusData.fsk_state = bfsk_prepare_state(
                             first_chunk=chunk.astype(np.float32, copy=False),
                             Fs=float(self.statusData.sample_rate),
-                            f_low=float(self.statusData.fsk_fc2),    # bit 0
-                            f_high=float(self.statusData.fsk_fc1),   # bit 1
+                            f_high=float(self.statusData.fsk_fc1),  # “1”
+                            f_low=float(self.statusData.fsk_fc2),   # “0”
                             Ac=float(self.statusData.fsk_Ac),
                             bitrate=float(self.statusData.fsk_bitrate),
                         )
+                        self.statusData.fsk_initialized = True
                     except Exception as e:
-                        self.log_result(f"[FSK] prepare_state error: {e}", color="#FF3B30")
+                        self.log_result(f"[FSK] prepare error: {e}", color="#FF3B30")
                         return
-                    self.statusData.fsk_state = st
-                    self.statusData.fsk_initialized = True
 
-                # MODULAR: devuelve s_mod y bits por muestra para “original” (NRZ 0/1)
+                # MOD
                 try:
-                    s_mod, bits_nrz = bfsk_modulate_block(
-                        x_chunk=chunk.astype(np.float32, copy=False),
-                        state=self.statusData.fsk_state
+                    s_mod, bits_nrz, self.statusData.fsk_state, stats = bfsk_modulate_block(
+                        chunk.astype(np.float32, copy=False),
+                        self.statusData.fsk_state
                     )
                 except Exception as e:
-                    self.log_result(f"[FSK] modulate error: {e}", color="#FF3B30")
+                    self.log_result(f"[FSK] mod error: {e}", color="#FF3B30")
                     return
 
-                # ORIGINAL: para FSK mostramos el NRZ (0/1)
-                orig_display = bits_nrz
-                ring = self.statusData.ring
-                if len(orig_display) >= len(ring):
-                    ring[:] = orig_display[-len(ring):]
-                else:
-                    L = len(orig_display)
-                    ring[:-L] = ring[L:]
-                    ring[-L:] = orig_display
+                # Si no produjo símbolos completos aún, posponer UI/log para este ciclo
+                if s_mod.size == 0 or bits_nrz.size == 0:
+                    return
 
-                # NCC: original = NRZ, demod (más abajo) = y_soft
-                if self.statusData.ncc_pairer is not None:
-                    self.statusData.ncc_pairer.push_original(cid, orig_display.astype(np.float32, copy=False))
+                # ORIGINAL (NRZ a [-0.1,+0.1]) → ring “original”
+                orig_display = (bits_nrz.astype(np.float32) * 0.2) - 0.1
+                ring = getattr(self.statusData, "ring", None)
+                if ring is not None and len(ring) > 0:
+                    if len(orig_display) >= len(ring):
+                        ring[:] = orig_display[-len(ring):]
+                    else:
+                        L = len(orig_display)
+                        if L > 0:
+                            ring[:-L] = ring[L:]
+                            ring[-L:] = orig_display
 
-                # MOD_RING: copia s_mod
+                # MOD_RING
                 mring = self.statusData.mod_ring
-                if len(s_mod) >= len(mring):
-                    mring[:] = s_mod[-len(mring):]
-                else:
-                    Lm = len(s_mod)
-                    mring[:-Lm] = mring[Lm:]
-                    mring[-Lm:] = s_mod
+                if len(mring) > 0:
+                    if len(s_mod) >= len(mring):
+                        mring[:] = s_mod[-len(mring):]
+                    else:
+                        Lm = len(s_mod)
+                        if Lm > 0:
+                            mring[:-Lm] = mring[Lm:]
+                            mring[-Lm:] = s_mod
 
-                # DEMOD: y_soft y bits estimados por muestra
+                # DEMOD
                 try:
-                    y_soft, bits_hat = bfsk_demodulate_block(
-                        s_chunk=s_mod.astype(np.float32, copy=False),
-                        state=self.statusData.fsk_state
+                    y_plot, bits_hat, self.statusData.fsk_state = bfsk_demodulate_block(
+                        s_mod.astype(np.float32, copy=False),
+                        self.statusData.fsk_state
                     )
                 except Exception as e:
                     self.log_result(f"[FSK] demod error: {e}", color="#FF3B30")
                     return
 
-                # Guardar ambas señales
-                self.statusData.fsk_state["last_y_soft"] = y_soft
+                # Puede ocurrir que demod no emita (si quedó justo cortado el símbolo)
+                if y_plot.size == 0 or bits_hat.size == 0:
+                    return
 
-                # DEMOD_RING: mostrar reconstrucción digital
+                # DEMOD_RING (y_plot ya viene en [-0.1,+0.1])
                 dring = self.statusData.demod_ring
-                if len(bits_hat) >= len(dring):
-                    dring[:] = bits_hat[-len(dring):]
-                else:
-                    Ld = len(bits_hat)
-                    dring[:-Ld] = dring[Ld:]
-                    dring[-Ld:] = bits_hat
+                if len(dring) > 0:
+                    if len(y_plot) >= len(dring):
+                        dring[:] = y_plot[-len(dring):]
+                    else:
+                        Ld = len(y_plot)
+                        if Ld > 0:
+                            dring[:-Ld] = dring[Ld:]
+                            dring[-Ld:] = y_plot
 
-                # Métrica digital (si la usas)
-                if hasattr(self.statusData, "digital_log"):
-                    acc = digital_accuracy(bits_nrz, bits_hat)
-                    color = "#00FF00" if acc >= 70.0 else "#FF3B30"
-                    self.log_result(f"[FSK] Accuracy: {acc:.1f}%", color=color)
+                # LOG estilo NCC (texto), usando chunk_seq como cid
+                try:
+                    cid = getattr(self.statusData, "chunk_seq", 0)
+                    spb = int(stats.get("spb", max(2, int(round(self.statusData.sample_rate / max(1.0, self.statusData.fsk_bitrate))))))
 
-                # NCC: como AM/FM/ASK
-                if self.statusData.ncc_pairer is not None:
-                    res = self.statusData.ncc_pairer.push_demodulated(cid, np.asarray(y_soft, dtype=np.float32))
-                    if res is not None:
-                        pct = res["percent"]
-                        thr = getattr(self.statusData, "ncc_threshold", 70.0)
-                        color = "#00FF00" if pct >= thr else "#FF3B30"
-                        self.log_result(f"Chunk #{res['chunk_id']} processed NCC: {pct:.1f}%", color=color)
+                    def to_symbols(bits: np.ndarray, spb_: int) -> np.ndarray:
+                        L = int(bits.size)
+                        q = L // spb_
+                        if q <= 0:
+                            return np.array([], dtype=np.uint8)
+                        b = bits[:q * spb_].reshape(q, spb_)
+                        return (np.mean(b, axis=1) >= 0.5).astype(np.uint8)
+
+                    sym_src = to_symbols(bits_nrz, spb)
+                    sym_hat = to_symbols(bits_hat, spb)
+
+                    if sym_src.size > 0 and sym_hat.size > 0 and (sym_src.size == sym_hat.size):
+                        acc = float(digital_accuracy(sym_src, sym_hat))  # tu función
+                        acc_pct = acc * 100.0 if acc <= 1.5 else acc
+                        self.log_result(f"[FSK] Chunk #{cid} processed NCC: {acc_pct:.1f}%",
+                                        color="#00FF00" if acc_pct >= 70.0 else "#FF3B30")
+                    else:
+                        # Si aún no hay símbolos completos alineados, solo loguea el avance
+                        tau_blk = stats.get("tau_blk", None)
+                        if tau_blk is not None:
+                            self.log_result(f"[FSK] Chunk #{cid} processed | spb={spb} | τ_blk≈{tau_blk:.4f}")
+                        else:
+                            self.log_result(f"[FSK] Chunk #{cid} processed")
+
+                    # incrementa el contador de chunks
+                    setattr(self.statusData, "chunk_seq", cid + 1)
+
+                except Exception as e:
+                    self.log_result(f"[FSK] NCC error: {e}", color="#FF3B30")
+
+
 
         # --- 4) Pintar si hubo datos ---
         if drained:
             self.line1.set_ydata(self.statusData.ring)
+
         if self.statusData.modulation_enabled:
             mt = self.statusData.modulation_type.get()
             if mt in ("AM", "FM", "ASK", "FSK"):
                 self.line2.set_ydata(self.statusData.mod_ring)
                 self.line3.set_ydata(self.statusData.demod_ring)
-        self.canvas1.draw_idle(); self.canvas2.draw_idle(); self.canvas3.draw_idle()
 
+        # --- 🔧 Autoescala solo en Y (eje vertical fijo) ---
+        for ax in [self.ax1, self.ax2, self.ax3]:
+            ax.relim()
+            ax.autoscale_view(scalex=False, scaley=True)
+
+        # --- Redibujar ---
+        self.canvas1.draw_idle()
+        self.canvas2.draw_idle()
+        self.canvas3.draw_idle()
 
         # Reprogramar
         if self.statusData.is_running and not self.statusData.paused:
@@ -1056,7 +1105,8 @@ class Dashboard(ctk.CTk):
         x = np.arange(len(self.statusData.ring))
         self.line1, = self.ax1.plot(x, self.statusData.ring, color='cyan', animated=False)
         self.ax1.set_xlim(0, len(self.statusData.ring))
-        self.ax1.set_ylim(-1.1, 1.1)
+        self.ax1.relim()
+        self.ax1.autoscale_view(scalex=False, scaley=True)
         self.canvas1.draw()
         self.ax1.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
         self.ax1.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))
@@ -1075,7 +1125,8 @@ class Dashboard(ctk.CTk):
         x2 = np.arange(len(self.statusData.mod_ring))
         self.line2, = self.ax2.plot(x2, self.statusData.mod_ring, color='orange', animated=False)
         self.ax2.set_xlim(0, len(self.statusData.mod_ring))
-        self.ax2.set_ylim(-1.1, 1.1)
+        self.ax2.relim()
+        self.ax2.autoscale_view(scalex=False, scaley=True)
         self.canvas2.draw()
         self.ax2.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
         self.ax2.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))
@@ -1093,7 +1144,8 @@ class Dashboard(ctk.CTk):
         x3 = np.arange(len(self.statusData.demod_ring))
         self.line3, = self.ax3.plot(x3, self.statusData.demod_ring, color='magenta', animated=False)
         self.ax3.set_xlim(0, len(self.statusData.demod_ring))
-        self.ax3.set_ylim(-1.1, 1.1)
+        self.ax3.relim()
+        self.ax3.autoscale_view(scalex=False, scaley=True)
         self.canvas3.draw()
         self.ax3.xaxis.set_major_locator(MultipleLocator(self.statusData.block_size * 4))
         self.ax3.xaxis.set_minor_locator(MultipleLocator(self.statusData.block_size))

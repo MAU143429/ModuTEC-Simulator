@@ -1,32 +1,79 @@
-
-from tkinter import filedialog
-import os
-import time
-import threading
 import queue
 import wave
 import numpy as np
-import sounddevice as sd
 from pydub import AudioSegment
 
+# -------------------------------
+# Helpers (fuera de la clase)
+# -------------------------------
+def dbfs_to_linear(db: float) -> float:
+    return float(10.0 ** (db / 20.0))
+
+def compute_rms(x):
+    if x is None or x.size == 0:
+        return 0.0
+    x64 = x.astype(np.float64, copy=False)
+    x_dc = x64 - np.mean(x64)
+    return float(np.sqrt(np.mean(x_dc * x_dc)))
 
 class AudioController:
-    
     def __init__(self, appstate):
         self.state = appstate
         self._sd_stream = None
         self._q = queue.Queue(maxsize=10)
 
-
     def mp3ToWav(self, mp3_path):
-        """Convierte un archivo MP3 a WAV temporal y retorna la ruta WAV."""
+        print("path mp3:", mp3_path)
         mp3_audio = AudioSegment.from_mp3(mp3_path)
         wav_path = mp3_path + ".temp.wav"
         mp3_audio.export(wav_path, format="wav")
         return wav_path
 
+    def load_wav_and_analyze(self, wav_path):
+        """
+        Carga WAV en memoria, NO normaliza la señal globalmente.
+        Sólo mide características globales informativas y cambia normalize_mode a "block".
+        """
+        try:
+            wf = wave.open(wav_path, "rb")
+            Fs = wf.getframerate()
+            nch = wf.getnchannels()
+            sampw = wf.getsampwidth()
+            dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sampw, np.int16)
+
+            raw = wf.readframes(wf.getnframes())
+            data = np.frombuffer(raw, dtype=dtype)
+
+            if nch > 1:
+                data = data.reshape(-1, nch).mean(axis=1)
+
+            if np.issubdtype(dtype, np.integer):
+                data = data.astype(np.float32) / np.iinfo(dtype).max
+            else:
+                data = data.astype(np.float32, copy=False)
+
+            wf.close()
+
+            self.state.audio_file_path = wav_path
+            self.state.audio_array = data
+            self.state.sample_rate = Fs
+            self.state.num_samples = len(data)
+            self.state.audio_channels = nch
+
+            rms_in = compute_rms(data)
+            self.state.rms_in = float(rms_in)
+            self.state.rms_target = float(dbfs_to_linear(-12.0))
+            self.state.global_gain = 1.0   # NO usar en el pipeline adaptativo
+            self.state.normalize_mode = "block"
+
+            if not hasattr(self.state, "display_gain"):
+                self.state.display_gain = 1.0
+
+            print(f"[audio] loaded: Fs={Fs}Hz, ch={nch}, RMS_in={rms_in:.6f}")
+        except Exception as e:
+            print(f"[audio] error al cargar WAV: {e}")
+    
     def recommend_params(self):
-        
         # General Information
         try:
             src_path = self.state.audio_file_path
@@ -35,59 +82,91 @@ class AudioController:
             with wave.open(src_path, "rb") as wf:
                 Fs = wf.getframerate()
         except Exception as e:
-            print(f"[audio] no se pudo extraer sample rate del WAV: {e}")         
+            print(f"[audio] no se pudo extraer sample rate del WAV: {e}")
+            Fs = self.state.sample_rate or 44100
+
         fmax = self.estimate_fmax_from_wav()
         self.state.fmax = fmax
         self.state.recommended_Fs = Fs
-        
-        # AM Values
-        
-        self.state.recommended_am_fc = min(Fs/4, max(100, 10*fmax))
-        
-        self.state.recommended_am_mu = 0.7
 
+        # AM
+        self.state.recommended_am_fc = min(Fs/4, max(100, 10*fmax))
+        self.state.recommended_am_mu = 0.7
         self.state.recommended_am_Ac = 0.90 / (1 + self.state.recommended_am_mu)
 
-        # FM Values
-
+        # FM
         self.state.recommended_fm_fc = min(Fs/4, max(100, 10*fmax))
-        
         self.state.recommended_fm_Ac = 0.90
-        
-        beta = 2.0  # índice base propuesto
-        BW = 2 * (beta * fmax + fmax)  # ancho de banda según Carson
-        nyquist_margin = 0.9 * (Fs / 2)
+        self.state.recommended_fm_beta = 1.0
 
-        if BW > nyquist_margin:
-            beta_max = (0.45 * Fs - fmax) / fmax   # valor máximo permitido
-            self.state.recommended_fm_beta = max(1.0, min(beta, beta_max))   # mantenerlo entre 1 y beta_max
-        
-        # ASK Values
-        
+        # ASK
         self.state.recommended_ask_bitrate = min(Fs/10, 4*fmax)
-        
         self.state.recommended_ask_fc = min(Fs/4, max(1000, 10*self.state.recommended_ask_bitrate))
-
         self.state.recommended_ask_Ac = 0.90
-        
-        # FSK Values
 
+        # FSK
         self.state.recommended_fsk_bitrate = min(Fs/10, 4*fmax)
-
-        self.state.recommended_fsk_fc1 = min(Fs/4, max(1000, 10*self.state.recommended_fsk_bitrate))
-        
-        self.state.recommended_fsk_fc2 = self.state.recommended_fsk_fc1 * 5
-
+        self.state.recommended_fsk_fc2 = min(Fs/4, max(1000, 10*self.state.recommended_fsk_bitrate))
+        self.state.recommended_fsk_fc1 = self.state.recommended_fsk_fc2 * 5
         self.state.recommended_fsk_Ac = 0.90
+    '''
+    
+    def recommend_params(self):
+        """
+        Calcula valores recomendados coherentes con el enfoque adaptativo por bloque.
+        Se basa en fmax del audio, asegurando separación espectral y spb >= 16.
+        """
+        try:
+            src_path = self.state.audio_file_path
+            if not src_path or not src_path.lower().endswith(".wav"):
+                raise ValueError("se esperaba un archivo .wav")
+            with wave.open(src_path, "rb") as wf:
+                Fs = wf.getframerate()
+        except Exception as e:
+            print(f"[audio] no se pudo extraer sample rate del WAV: {e}")
+            Fs = self.state.sample_rate or 44100
 
+        fmax = self.estimate_fmax_from_wav()
+        self.state.fmax = fmax
+        self.state.recommended_Fs = Fs
+
+        # --- AM ---
+        am_fc = np.clip(6.0 * fmax, 1000.0, Fs / 6.0)
+        am_mu = 0.6
+        am_Ac = 0.9 / (1.0 + am_mu)
+        self.state.recommended_am_fc = am_fc
+        self.state.recommended_am_mu = am_mu
+        self.state.recommended_am_Ac = am_Ac
+
+        # --- FM ---
+        fm_fc = np.clip(6.0 * fmax, 1000.0, Fs / 6.0)
+        fm_beta = np.clip(fmax / 200.0, 0.5, 4.0)
+        fm_Ac = 0.9
+        self.state.recommended_fm_fc = fm_fc
+        self.state.recommended_fm_beta = fm_beta
+        self.state.recommended_fm_Ac = fm_Ac
+
+        # --- ASK ---
+        ask_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
+        ask_fc = np.clip(8.0 * ask_bitrate, 2000.0, Fs / 5.0)
+        ask_Ac = 0.9
+        self.state.recommended_ask_bitrate = ask_bitrate
+        self.state.recommended_ask_fc = ask_fc
+        self.state.recommended_ask_Ac = ask_Ac
+
+        # --- FSK (BFSK) ---
+        fsk_bitrate = np.clip(Fs / 24.0, 800.0, 5000.0)
+        fsk_fc2 = np.clip(6.0 * fsk_bitrate, 2000.0, Fs / 6.0)   # LOW
+        fsk_fc1 = fsk_fc2 + max(0.5 * fsk_bitrate, 1500.0)       # HIGH
+        fsk_Ac = 0.9
+        self.state.recommended_fsk_bitrate = fsk_bitrate
+        self.state.recommended_fsk_fc1 = fsk_fc1
+        self.state.recommended_fsk_fc2 = fsk_fc2
+        self.state.recommended_fsk_Ac = fsk_Ac
+
+        print(f"[recommend] Fs={Fs}Hz fmax={fmax:.1f}Hz | AMfc={am_fc:.1f}Hz ASK_Rb={ask_bitrate:.1f}bps FSK Δf={fsk_fc1-fsk_fc2:.1f}Hz")
+    '''
     def estimate_fmax_from_wav(self, chunks=6, chunk_frames=44100, target_fs=8000, nfft=4096, energy_pct=0.99):
-        """
-        Lightweight Fmax estimator:
-        - samples `chunks` blocks evenly across the file
-        - decimates to `target_fs` (integer decimation)
-        - computes averaged periodograms (Hann, 50% overlap)
-        - returns frequency where cumulative energy >= energy_pct
-        """
         try:
             wf = wave.open(self.state.audio_file_path, "rb")
         except Exception:
@@ -103,13 +182,9 @@ class AudioController:
 
             psd_acc = None
             wins = 0
-            # sample `chunks` positions across the file
             chunks = max(1, int(chunks))
             for k in range(chunks):
-                if chunks == 1:
-                    pos = 0
-                else:
-                    pos = int((k * max(0, total_frames - chunk_frames)) / max(1, chunks - 1))
+                pos = int((k * max(0, total_frames - chunk_frames)) / max(1, chunks - 1)) if chunks > 1 else 0
                 try:
                     wf.setpos(min(pos, total_frames - 1))
                 except Exception:
@@ -121,12 +196,10 @@ class AudioController:
                 if nch > 1:
                     data = data.reshape(-1, nch).mean(axis=1)
                 x = data.astype(np.float32)
-                # normalize integer types
                 if np.issubdtype(dtype, np.integer):
                     x /= float(np.iinfo(dtype).max)
 
-                # integer decimation to speed up (no anti-aliasing filter for simplicity)
-                decim = max(1, int(Fs // target_fs)) if (target_fs and target_fs < Fs) else 1
+                decim = max(1, int(Fs // (target_fs or Fs))) if target_fs and target_fs < Fs else 1
                 if decim > 1:
                     x = x[::decim]
                     Fs_eff = Fs / decim
@@ -135,7 +208,6 @@ class AudioController:
 
                 step = nfft // 2
                 if len(x) < nfft:
-                    # pad to nfft
                     seg = np.zeros(nfft, dtype=np.float32)
                     seg[:len(x)] = x
                     seg *= np.hanning(nfft)
@@ -167,21 +239,3 @@ class AudioController:
                 wf.close()
             except Exception:
                 pass
-    
-    def ensure_sd_stream(self):
-        """Abre/inicia el stream de salida si no existe."""
-        if self.sd_stream is not None:
-            return
-        try:
-            self.sd_stream = sd.OutputStream(
-                samplerate=int(self.state.sample_rate),
-                channels=self.state.audio_channels,
-                dtype="float32",
-                blocksize=int(self.state.blocksize),
-                device=self.state.sd_device,
-            )
-            self.sd_stream.start()
-            print("[audio] output stream started")
-        except Exception as e:
-            print(f"[audio] no se pudo abrir el output stream: {e}")
-            self.sd_stream = None

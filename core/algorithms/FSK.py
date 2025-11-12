@@ -1,202 +1,236 @@
-# core/algorithms/FSK.py — BFSK (dos tonos) con mapeo audio→bits y continuidad por bloques
+# core/algorithms/FSK.py — BFSK por bloques reutilizando la digitalización de ASK
 import numpy as np
-_TWO_PI = 2.0*np.pi
+import math
 
-# ---------- Utilidades internas ----------
+_TWO_PI = 2.0 * np.pi
 
-def _robust_peak(x: np.ndarray) -> float:
-    return float(np.percentile(np.abs(x), 99.0) + 1e-12)
-
+# ---------------------------------------------------------------------
+# Utilidades compartidas (idéntico enfoque a ASK, pero aquí local)
+# ---------------------------------------------------------------------
 def _alpha_from_fc(fc_hz: float, Fs: float) -> float:
-    fc_hz = max(1.0, float(fc_hz))
-    return 1.0 - np.exp(-2.0*np.pi*fc_hz / Fs)
+    fc_hz = max(1.0, float(fc_hz)); Fs = float(Fs)
+    return 1.0 - math.exp(-2.0 * math.pi * fc_hz / Fs)
 
-def _schmitt_sample(v: float, state_val: float, low: float, high: float) -> float:
-    # Histéresis binaria para binarizar PCM (igual patrón que ASK)
-    if state_val <= 0.5:
-        return 1.0 if v >= high else 0.0
-    else:
-        return 0.0 if v <= low else 1.0
+def _nrz_from_abs_symbol_locked_fsk(x: np.ndarray, st: dict, tau_blk: float):
+    """
+    MISMA DIGITALIZACIÓN QUE ASK:
+      - Trabaja sobre |x| para robustez
+      - 'spb' constante (reloj de símbolo)
+      - histéresis relativa alrededor de tau_blk
+      - debounce por símbolos
+      - conserva acumuladores entre bloques
+    Devuelve bits NRZ por MUESTRA (0/1) y actualiza 'st' (acumuladores).
+    """
+    x = x.astype(np.float32, copy=False)
+    spb   = int(st["spb"])
+    band  = float(st["hyst_frac"]) * float(tau_blk)
+    since = int(st["since_toggle_mod"])
 
-# ---------- Estado y preparación ----------
+    sym_sum = float(st["mod_sym_sum"])
+    sym_cnt = int(st["mod_sym_cnt"])
+    bit     = int(st["mod_bit"])
 
+    bits = np.empty_like(x, dtype=np.uint8)
+
+    for i, v in enumerate(x):
+        av = v if v >= 0 else -v
+        sym_sum += float(av)
+        sym_cnt += 1
+        bits[i] = bit
+        since  += 1
+
+        if sym_cnt >= spb:
+            m = sym_sum / float(sym_cnt)
+            up   = tau_blk + band
+            down = tau_blk - band
+
+            if m >= up and since >= st["debounce_syms"]:
+                bit = 1; since = 0
+            elif m <= down and since >= st["debounce_syms"]:
+                bit = 0; since = 0
+            # si m cae en (down, up) mantiene el bit previo
+
+            sym_sum = 0.0
+            sym_cnt = 0
+
+    st["mod_sym_sum"] = float(sym_sum)
+    st["mod_sym_cnt"] = int(sym_cnt)
+    st["mod_bit"]     = int(bit)
+    st["since_toggle_mod"] = int(since)
+    return bits, st
+
+
+# ---------------------------------------------------------------------
+# PREPARE STATE
+# ---------------------------------------------------------------------
 def bfsk_prepare_state(first_chunk: np.ndarray,
                        Fs: float,
-                       f_low: float,
-                       f_high: float,
+                       f_high: float,  # bit = 1
+                       f_low: float,   # bit = 0
                        Ac: float,
-                       bitrate: float):
+                       bitrate: float) -> dict:
     """
-    Prepara parámetros fijos y estado persistente para BFSK.
-    Entradas del usuario: Fs, f_low (0), f_high (1), Ac, bitrate.
-    - spb = Fs/bitrate (mínimo 2)
-    - xscale desde primer bloque (pico robusto)
-    - Histéresis adaptativa en audio normalizado (como ASK)
-    - Demod: correlación I/Q + LPF 1 polo (corte ≈ Rb/4)
+    Estado persistente. Reusa EXACTAMENTE el esquema de digitalización de ASK:
+      - spb (= Fs/Rb, min 2)
+      - umbral por bloque (percentil de |x|)
+      - histéresis y debounce por símbolo
+      - continuidad de fase (CPFSK)
+    La demod usa correlación I/Q + LPF 1 polo y decide por símbolo.
     """
-    x = first_chunk.astype(np.float64, copy=False)
-    xscale = _robust_peak(x)
-    spb = max(2, int(round(Fs / max(1.0, float(bitrate)))))
+    st = {}
+    Fs = float(Fs); Rb = float(max(1.0, bitrate))
+    st["Fs"] = Fs
+    st["f1"] = float(f_high)
+    st["f0"] = float(f_low)
+    st["Ac"] = float(Ac)
+    st["Rb"] = Rb
 
-    # Umbrales sobre el primer bloque normalizado (como ASK)
-    xn = x / xscale if xscale > 0 else x
-    p95 = float(np.percentile(np.abs(xn), 95.0)) if len(xn) else 1.0
-    thr_high = 0.35 * p95
-    thr_low  = 0.15 * p95
+    # reloj de símbolo
+    spb = int(round(Fs / Rb))
+    st["spb"] = max(2, spb)
 
-    # LPF para I/Q en demod (suave respecto al bitrate)
-    env_fc = max(1.0, 0.25 * bitrate)
-    env_alpha = _alpha_from_fc(env_fc, Fs)
+    # --- parámetros de digitalización (idénticos a ASK) ---
+    st["thr_percentile"] = 70.0   # percentil aplicado sobre |x| de CADA bloque
+    st["hyst_frac"]      = 0.10   # banda de histéresis como fracción de tau_blk
+    st["debounce_syms"]  = 1      # símbolos mínimos entre toggles
 
-    state = {
-        # Parámetros fijos
-        "Fs": float(Fs),
-        "f0": float(f_low),     # tono para bit 0
-        "f1": float(f_high),    # tono para bit 1
-        "Ac": float(Ac),
-        "bitrate": float(bitrate),
-        "spb": int(spb),
-        "xscale": float(xscale),
+    # acumuladores por símbolo (MOD)
+    st["mod_sym_sum"] = 0.0
+    st["mod_sym_cnt"] = 0
+    st["mod_bit"]     = 0
+    st["since_toggle_mod"] = 1e9
+    st["last_tau_blk"] = 0.0
 
-        # Modulación (binarización + reloj símbolo + fase continua CPFSK)
-        "mod_thr_low":  float(thr_low),
-        "mod_thr_high": float(thr_high),
-        "mod_state": 0.0,          # estado Schmitt (0/1)
-        "mod_one_count": 0,
-        "mod_sample_in_sym": 0,
-        "mod_curr_bit": 0.0,
-        "phase": 0.0,              # fase acumulada (única) para continuidad CPFSK
+    # continuidad de portadora (CPFSK)
+    st["phase"] = 0.0
 
-        # Demod I/Q + LPF + decisión con histéresis en la traza "soft" y=e1-e0
-        "alpha": float(env_alpha),
-        "i0": 0.0, "q0": 0.0,      # acumuladores LPF para tono f0
-        "i1": 0.0, "q1": 0.0,      # acumuladores LPF para tono f1
-        "demod_state": 0.0,        # estado Schmitt sobre y=e1-e0
-        "hyst": 0.15,              # ±15% de histéresis sobre umbral 0
-        "run_len": 0,              # deglitch: longitud de racha
-    }
-    return state
+    # --- DEMOD: correlación I/Q + LPF por muestra ---
+    # fc_env ≈ 0.25 * Rb (suaviza unas 4 muestras por símbolo en promedio)
+    env_fc = max(1.0, 0.25 * Rb)
+    st["iq_alpha"] = _alpha_from_fc(env_fc, Fs)
 
-# ---------- Modulación ----------
+    st["i0"] = 0.0; st["q0"] = 0.0
+    st["i1"] = 0.0; st["q1"] = 0.0
 
+    # acumuladores para decisión por símbolo (sobre y = e1 - e0)
+    st["dem_sym_sum"] = 0.0
+    st["dem_sym_cnt"] = 0
+    st["dem_prev_bit"] = 0
+
+    return st
+
+
+# ---------------------------------------------------------------------
+# MOD (audio -> bits NRZ usando el MISMO enfoque de ASK) + CPFSK
+# ---------------------------------------------------------------------
 def bfsk_modulate_block(x_chunk: np.ndarray, state: dict):
     """
-    Modulación BFSK desde PCM (audio→bits→CPFSK):
-      1) Normaliza por xscale
-      2) Binariza por histéresis (Schmitt)
-      3) Decisión por símbolo (mayoría cada spb) con continuidad entre bloques
-      4) CPFSK: fase integra frecuencia por muestra (f1 si bit=1, f0 si bit=0)
-    Devuelve: s (modulada), bits_nrz_por_muestra (0/1)
+    1) Calcula tau_blk = percentil(|x|, thr_percentile)  [idéntico a ASK]
+    2) Digitaliza por símbolo (|x|) con histéresis y debounce [idéntico a ASK]
+    3) CPFSK continua: f1 para bit=1, f0 para bit=0, con fase persistente
+    Devuelve: s_mod, bits_nrz (uint8), state, stats{'spb','tau_blk'}
     """
-    Fs, f0, f1, Ac, spb = state["Fs"], state["f0"], state["f1"], state["Ac"], state["spb"]
-    xscale = state["xscale"]
-    thr_low, thr_high = state["mod_thr_low"], state["mod_thr_high"]
+    Fs = float(state["Fs"])
+    f0 = float(state["f0"])
+    f1 = float(state["f1"])
+    Ac = float(state["Ac"])
+    spb = int(state["spb"])
 
-    mod_state = state["mod_state"]
-    ones = state["mod_one_count"]
-    k = state["mod_sample_in_sym"]
-    curr_bit = state["mod_curr_bit"]
-    phase = state["phase"]
+    # --- 1) Umbral por bloque (robusto)
+    p = float(state.get("thr_percentile", 70.0))
+    absx = np.abs(x_chunk.astype(np.float32, copy=False))
+    tau_blk = float(np.percentile(absx, p))
+    tau_blk = max(tau_blk, 1e-9)
+    state["last_tau_blk"] = tau_blk
 
-    x = x_chunk.astype(np.float64, copy=False) / xscale
-    n = len(x)
-    bits_nrz = np.empty(n, dtype=np.float64)
+    # --- 2) NRZ por símbolo (sobre |x|) — exactamente como ASK
+    bits_nrz, state = _nrz_from_abs_symbol_locked_fsk(x_chunk, state, tau_blk)  # (0/1 por muestra)
 
-    # Generar bits NRZ por muestra con reloj de símbolo continuo
-    for i in range(n):
-        b_sample = _schmitt_sample(x[i], mod_state, thr_low, thr_high)
-        mod_state = b_sample
-        ones += 1 if b_sample >= 0.5 else 0
-        k += 1
+    # --- 3) CPFSK continua
+    fi = np.where(bits_nrz > 0, f1, f0).astype(np.float64)
+    dphi = (_TWO_PI * fi) / Fs
+    phi0 = float(state.get("phase", 0.0))
+    phi = phi0 + np.cumsum(dphi)
+    s_mod = (Ac * np.cos(phi)).astype(np.float32)
+    state["phase"] = float(phi[-1] % (2.0 * np.pi)) if s_mod.size else phi0
 
-        # Mantener el bit de salida hasta cerrar símbolo
-        bits_nrz[i] = curr_bit
+    stats = {"spb": spb, "tau_blk": float(tau_blk)}
+    return s_mod, bits_nrz.astype(np.uint8), state, stats
 
-        if k >= spb:
-            curr_bit = 1.0 if (ones >= (spb - ones)) else 0.0
-            ones = 0
-            k = 0
 
-    # CPFSK: integrar fase según frecuencia instantánea
-    fi = np.where(bits_nrz > 0.5, f1, f0)
-    # φ[n] = φ[n-1] + 2π*fi[n]/Fs
-    ph = phase + _TWO_PI * np.cumsum(fi)/Fs
-    s = Ac * np.cos(ph)
-    phase = float(np.mod(ph[-1], _TWO_PI)) if n else phase
-
-    # Guardar estado
-    state["mod_state"] = float(mod_state)
-    state["mod_one_count"] = int(ones)
-    state["mod_sample_in_sym"] = int(k)
-    state["mod_curr_bit"] = float(curr_bit)
-    state["phase"] = float(phase)
-
-    return s, bits_nrz
-
-# ---------- Demodulación ----------
-
+# ---------------------------------------------------------------------
+# DEMOD (correlación I/Q + LPF) → decisión por símbolo sobre y=e1−e0
+# ---------------------------------------------------------------------
 def bfsk_demodulate_block(s_chunk: np.ndarray, state: dict):
     """
-    Demod BFSK:
-      - Mezcla con cos/sin en f0 y f1 por muestra
-      - LPF 1-polo en I/Q
-      - Energía e0 = sqrt(I0^2+Q0^2), e1 análogo
-      - y = e1 - e0 (soft)
-      - bits_hat reconstruido cada símbolo (NRZ 0/1)
-    Devuelve:
-      y_soft: traza continua (útil para comparar)
-      bits_hat_nrz: señal digital reconstruida (0/1 por muestra)
+    - Mezcla con cos/sin en f0 y f1 por muestra
+    - LPF 1 polo (alpha=iq_alpha) para I/Q
+    - Energías: e0 = sqrt(I0^2+Q0^2), e1 análogo
+    - y_soft = e1 - e0 (traza continua)
+    - bits_hat: integrate-and-dump por símbolo sobre y_soft (signo)
+    - y_plot: mapea bits_hat a [-0.1, +0.1] (para UI)
     """
     s = s_chunk.astype(np.float64, copy=False)
-    Fs, f0, f1, alpha, spb = (
-        state["Fs"], state["f0"], state["f1"], state["alpha"], state["spb"]
-    )
+    Fs = float(state["Fs"])
+    f0 = float(state["f0"])
+    f1 = float(state["f1"])
+    spb = int(state["spb"])
+    alpha = float(state.get("iq_alpha", 0.25))
+
     n = len(s)
     if n == 0:
-        return np.zeros(0), np.zeros(0)
+        return np.zeros(0, np.float32), np.zeros(0, np.uint8), state
 
-    # 1) Correlación I/Q
-    t = np.arange(n) / Fs
+    # 1) Correlación I/Q + LPF por muestra
+    t = np.arange(n, dtype=np.float64) / Fs
     c0, s0 = np.cos(_TWO_PI * f0 * t), np.sin(_TWO_PI * f0 * t)
     c1, s1 = np.cos(_TWO_PI * f1 * t), np.sin(_TWO_PI * f1 * t)
 
     x0i, x0q = s * c0, s * (-s0)
     x1i, x1q = s * c1, s * (-s1)
 
-    i0, q0, i1, q1 = state["i0"], state["q0"], state["i1"], state["q1"]
-    y_i0 = np.empty_like(x0i)
-    y_q0 = np.empty_like(x0q)
-    y_i1 = np.empty_like(x1i)
-    y_q1 = np.empty_like(x1q)
+    i0, q0 = float(state["i0"]), float(state["q0"])
+    i1, q1 = float(state["i1"]), float(state["q1"])
 
+    y_i0 = np.empty_like(x0i); y_q0 = np.empty_like(x0q)
+    y_i1 = np.empty_like(x1i); y_q1 = np.empty_like(x1q)
+
+    a = float(alpha)
     for k in range(n):
-        i0 += alpha * (x0i[k] - i0)
-        q0 += alpha * (x0q[k] - q0)
-        i1 += alpha * (x1i[k] - i1)
-        q1 += alpha * (x1q[k] - q1)
+        i0 += a * (x0i[k] - i0);  q0 += a * (x0q[k] - q0)
+        i1 += a * (x1i[k] - i1);  q1 += a * (x1q[k] - q1)
         y_i0[k], y_q0[k], y_i1[k], y_q1[k] = i0, q0, i1, q1
 
-    # 2) Energías y traza "soft"
-    e0 = np.sqrt(y_i0 * y_i0 + y_q0 * y_q0)
-    e1 = np.sqrt(y_i1 * y_i1 + y_q1 * y_q1)
-    y_soft = e1 - e0
-
-    # 3) Reconstrucción digital (decisión por símbolo)
-    bits_hat = np.zeros_like(y_soft)
-    num_symbols = n // spb
-    for i in range(num_symbols):
-        start = i * spb
-        end = start + spb
-        seg = y_soft[start:end]
-        bits_hat[start:end] = 1.0 if np.mean(seg) > 0 else 0.0
-
-    # Último fragmento parcial
-    if num_symbols * spb < n:
-        seg = y_soft[num_symbols * spb:]
-        bits_hat[num_symbols * spb:] = 1.0 if np.mean(seg) > 0 else 0.0
-
-    # 4) Actualizar estado para continuidad
     state["i0"], state["q0"], state["i1"], state["q1"] = float(i0), float(q0), float(i1), float(q1)
 
-    return y_soft, bits_hat
+    # 2) Energías y traza soft
+    e0 = np.sqrt(y_i0 * y_i0 + y_q0 * y_q0)
+    e1 = np.sqrt(y_i1 * y_i1 + y_q1 * y_q1)
+    y_soft = (e1 - e0).astype(np.float32)
 
+    # 3) Decisión por símbolo (integrate-and-dump sobre y_soft)
+    sym_sum = float(state.get("dem_sym_sum", 0.0))
+    sym_cnt = int(state.get("dem_sym_cnt", 0))
+    prev    = int(state.get("dem_prev_bit", 0))
+
+    bits_hat = np.empty(n, dtype=np.uint8)
+    for k in range(n):
+        sym_sum += float(y_soft[k])
+        sym_cnt += 1
+        # mantener el último valor hasta cerrar símbolo
+        bits_hat[k] = prev
+        if sym_cnt >= spb:
+            m = sym_sum / float(sym_cnt)
+            prev = 1 if m >= 0.0 else 0
+            sym_sum = 0.0
+            sym_cnt = 0
+
+    state["dem_sym_sum"] = float(sym_sum)
+    state["dem_sym_cnt"] = int(sym_cnt)
+    state["dem_prev_bit"] = int(prev)
+
+    # 4) Traza para UI: NRZ → [-Aplot, +Aplot]
+    Aplot = 0.1
+    y_plot = (bits_hat.astype(np.float32) * (2.0 * Aplot)) - Aplot
+
+    return y_plot, bits_hat, state
