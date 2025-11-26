@@ -8,6 +8,7 @@ from scipy.io import wavfile
 from tkinter import filedialog
 import matplotlib.pyplot as plt
 from utils import windowCenter as wc
+from utils.paths import resource_path
 from CTkMessagebox import CTkMessagebox
 from core.statistics.metrics import NCCPairer
 from matplotlib.ticker import MultipleLocator
@@ -57,7 +58,7 @@ class Dashboard(ctk.CTk):
         self.title("ModuTEC Simulator")
         self.geometry("1600x900")
         wc.center_window(self, 1600, 900)
-        self.iconbitmap("assets/logo.ico")
+        self.iconbitmap(resource_path("assets/logo.ico"))
 
 
     # Creates the main application panels.
@@ -110,7 +111,7 @@ class Dashboard(ctk.CTk):
         btnsFont = ctk.CTkFont(family='FontAwesome', size=18, weight="bold")
         
         # Application Logo
-        logoIcon = Image.open("assets/logo.ico")
+        logoIcon = Image.open(resource_path("assets/logo.ico"))
         self.iconImage = ctk.CTkImage(dark_image=logoIcon, size=(50, 50))
         self.iconLabel = ctk.CTkButton(self.navbar, image=self.iconImage, text= "", fg_color=NAVBAR_COLOR, command=self.toggle_animation, hover= False, width=0, height=0)
         self.iconLabel.pack(side="left", padx=0, pady=0)
@@ -120,7 +121,7 @@ class Dashboard(ctk.CTk):
         self.titleLabel.pack(side="left", padx=0, pady=0)
         
         # Application Dashboard Title 
-        titleIcon = Image.open("assets/title.png")
+        titleIcon = Image.open(resource_path("assets/title.png"))
         self.iconImage = ctk.CTkImage(dark_image=titleIcon, size=(400, 50))
         self.dashLabel = ctk.CTkLabel(self.navbar, image=self.iconImage, text= "", fg_color=NAVBAR_COLOR, width=0, height=0)
         self.dashLabel.pack(side="left", fill="x", expand=True)
@@ -284,7 +285,7 @@ class Dashboard(ctk.CTk):
                      anchor="w").pack(pady=(15, 10), padx=10, anchor="w")
 
         # Upload Audio File Button and placeholder for file name
-        uploadIcon = Image.open("assets/upload.png")
+        uploadIcon = Image.open(resource_path("assets/upload.png"))
         self.uploadIcon = ctk.CTkImage(dark_image=uploadIcon, size=(30, 30))
         ctk.CTkLabel(self.optionsHeader, text="Audio File", font=labelFont, text_color="white").pack(padx=10, anchor="w")
         self.upload_button = ctk.CTkButton(self.optionsHeader, text="Upload audio file", command=self.load_audio, hover=False, compound="left", image=self.uploadIcon, fg_color=SIDEBAR_COLOR)

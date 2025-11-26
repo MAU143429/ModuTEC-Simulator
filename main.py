@@ -12,7 +12,6 @@
 from app.dashboard import Dashboard
 from app.appstate import AppState
 import customtkinter as ctk
-
 def main():
      statusData = AppState()
      ctk.set_appearance_mode("dark")
